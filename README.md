@@ -1,3 +1,3 @@
 ```bash
-npx skills add https://github.com/HuakunShen/skills/skills
+npx skills add https://github.com/HuakunShen/skills
 ```

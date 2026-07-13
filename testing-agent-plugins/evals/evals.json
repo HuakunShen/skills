@@ -1,0 +1,17 @@
+{
+  "skill_name": "testing-agent-plugins",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Given a plugin that registers a command, custom tool, shell.env hook, and message transform, write the unit, discovery, integration, and safety tests.",
+      "expected_output": "Includes direct tool.execute tests, hook input/output tests, temp config command and skill discovery tests, shell quoting tests, optional opencode run integration, and static or runtime safety checks for duplicate injection and secret leakage.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Create a test strategy for a background-agent orchestration plugin with cancellation, retries, parent notifications, and team-style task claiming.",
+      "expected_output": "Covers concurrency limits, FIFO queueing, cancellation slot release, retry classification, one parent notification per completion edge, atomic task claiming, mailbox delivery, cleanup, and spawn limits.",
+      "files": []
+    }
+  ]
+}

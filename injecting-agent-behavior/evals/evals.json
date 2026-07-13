@@ -1,0 +1,17 @@
+{
+  "skill_name": "injecting-agent-behavior",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Package three slash commands, two project skills, and one review subagent for OpenCode. The commands need arguments and one command should run in a subtask.",
+      "expected_output": "Recommends .opencode/commands or config.command, uses $ARGUMENTS/$1 and agent/subtask/model fields correctly, creates SKILL.md files in valid discovery paths, creates an agent with mode subagent and permissions, and includes discovery tests with temp config directories.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I want a plugin to auto-load my rules and skill docs into every session. Should I use commands, skills.paths, instructions, or chat.message transforms?",
+      "expected_output": "Ranks file/config-level primitives before transforms, explains when to use commands, skills.paths, instructions/rules, MCP config, and synthetic message injection, and includes idempotency and priority tests.",
+      "files": []
+    }
+  ]
+}

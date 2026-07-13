@@ -1,0 +1,17 @@
+{
+  "skill_name": "building-agent-orchestration",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Design an OpenCode plugin feature that launches three independent research agents in parallel, lets the parent keep working, and collects results later.",
+      "expected_output": "Chooses tool-backed background tasks over prompt-only delegation, returns task IDs immediately, defines background_output and cancellation behavior, uses concurrency limits, result collection, cleanup, and tests concurrent launch plus cancellation.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I want to build Team Mode with a lead agent, shared tasks, mailbox, and optional tmux panes. What architecture and guardrails do I need?",
+      "expected_output": "Requires durable state, mailbox, tasklist with atomic locks, member eligibility, lifecycle cleanup, spawn limits, no nested teams, optional tmux integration, and tests for claims, delivery, cleanup, and duplicate notifications.",
+      "files": []
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "skill_name": "porting-agent-plugins-across-harnesses",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Port an OpenCode plugin with commands, skills, MCP config, and one custom tool to Claude Code and Codex without duplicating the business logic.",
+      "expected_output": "Separates portable core from adapters, creates a capability matrix, maps commands/skills/tools/MCP/permissions per harness, refuses unsupported parity claims, and proposes adapter-specific acceptance tests.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Design a plugin package that works mainly in OpenCode today but can later support Claude Code, Codex, and Gemini. What should go in core versus adapters?",
+      "expected_output": "Places parsing, formatting, config schema, prompts, and deterministic helpers in core; places hook registration, tool naming, permissions, auth, UI, filesystem paths, and session APIs in adapters; includes clean-session load tests.",
+      "files": []
+    }
+  ]
+}

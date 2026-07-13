@@ -1,0 +1,17 @@
+{
+  "skill_name": "writing-opencode-plugins",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Build a local OpenCode plugin that adds a custom tool wrapping a shell script and injects PROJECT_ROOT plus MY_TOOL_TOKEN into shell commands.",
+      "expected_output": "Uses @opencode-ai/plugin, exports a Plugin, defines a tool with tool.schema, calls the script through Bun.$ or ctx.$ with quoted arguments, implements shell.env for environment injection, returns structured text or JSON, and includes unit plus optional opencode run tests.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Review this planned OpenCode plugin: it uses experimental.chat.messages.transform to inject a hidden reminder on every turn and calls client.session.promptAsync directly from two hooks. Tell me what to change before implementation.",
+      "expected_output": "Warns that experimental transforms and direct prompt injection are risky, recommends file/config primitives first, requires duplicate-injection guards or a shared dispatch gate, and separates official API from observed third-party patterns.",
+      "files": []
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "skill_name": "shadcn-svelte-monorepo",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Set up shadcn-svelte in this pnpm monorepo so apps/desktop can run the CLI but reusable components are generated into packages/ui and imported with $ui.",
+      "expected_output": "Explains or implements components.json aliases, SvelteKit $ui aliases in both app and UI package, and validation commands.",
+      "files": [
+        "apps/desktop/components.json",
+        "apps/desktop/svelte.config.js",
+        "packages/ui/svelte.config.js"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "shadcn-svelte add button wrote files under apps/desktop/src/lib instead of packages/ui. Fix the config and explain why it happened.",
+      "expected_output": "Identifies mismatched components.json aliases as the likely cause and updates aliases to $ui paths with matching kit.alias entries.",
+      "files": [
+        "apps/desktop/components.json",
+        "apps/desktop/svelte.config.js"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Document our Kunkun shadcn-svelte monorepo pattern for future agents, including how apps/desktop and packages/ui are wired together.",
+      "expected_output": "Produces concise documentation with Kunkun file references, CLI usage, path alias rules, and troubleshooting notes.",
+      "files": [
+        "apps/desktop/components.json",
+        "apps/desktop/svelte.config.js",
+        "packages/ui/components.json",
+        "packages/ui/svelte.config.js"
+      ]
+    }
+  ]
+}

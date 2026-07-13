@@ -1,0 +1,4 @@
+interface:
+  display_name: "ChatGPT External Chrome"
+  short_description: "Query ChatGPT through external Chrome"
+  default_prompt: "Use $chatgpt-external-chrome to ask ChatGPT in my logged-in external Chrome and return the result."

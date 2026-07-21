@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="568" height="420" viewBox="0 0 568 420" font-family="'JetBrains Mono','Fira Code',ui-monospace,'SF Mono',Consolas,'DejaVu Sans Mono',monospace" font-size="15">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <clipPath id="clip"><rect x="0" y="0" width="568" height="420" rx="12" ry="12"/></clipPath>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="0" y="0" width="568" height="420" rx="12" ry="12" fill="#1e1e2e"/>
+  </g>
+  <g clip-path="url(#clip)">
+    <rect x="0" y="0" width="568" height="32" fill="#181825"/>
+    <circle cx="18" cy="16" r="6" fill="#f38ba8"/>
+    <circle cx="38" cy="16" r="6" fill="#f9e2af"/>
+    <circle cx="58" cy="16" r="6" fill="#a6e3a1"/>
+    <text x="284" y="20" fill="#6c7086" font-size="12.5" text-anchor="middle">Centered popup / modal</text>
+    <rect x="0" y="0" width="568" height="420" fill="#1e1e2e" fill-opacity="0"/>
+    <g>
+<rect x="14.0" y="46.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="60.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">╭</text>
+<text x="23.0" y="60.8" textLength="153.0" lengthAdjust="spacingAndGlyphs" fill="#cdd6f4" font-weight="600" xml:space="preserve"> Deploy pipeline </text>
+<text x="176.0" y="60.8" textLength="378.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">─────────────────────────────────────────╮</text>
+<rect x="14.0" y="66.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="80.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="80.8" textLength="225.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-00 ......... queued</text>
+<text x="545.0" y="80.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="86.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="100.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="100.8" textLength="225.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-01 ......... queued</text>
+<text x="545.0" y="100.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="106.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="120.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="120.8" textLength="225.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-02 ......... queued</text>
+<text x="545.0" y="120.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="126.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="140.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="140.8" textLength="225.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-03 ......... queued</text>
+<text x="545.0" y="140.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="146.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="160.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="160.8" textLength="225.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-04 ......... queued</text>
+<text x="545.0" y="160.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="166.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<rect x="122.0" y="166.0" width="9.0" height="20.0" fill="#313244"/>
+<rect x="131.0" y="166.0" width="81.0" height="20.0" fill="#cba6f7"/>
+<rect x="212.0" y="166.0" width="234.0" height="20.0" fill="#313244"/>
+<rect x="446.0" y="166.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="180.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="180.8" textLength="99.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-05 ..</text>
+<text x="122.0" y="180.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">╔</text>
+<text x="131.0" y="180.8" textLength="81.0" lengthAdjust="spacingAndGlyphs" fill="#1e1e2e" font-weight="600" xml:space="preserve"> Confirm </text>
+<text x="212.0" y="180.8" textLength="234.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">═════════════════════════╗</text>
+<text x="545.0" y="180.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="186.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<rect x="122.0" y="186.0" width="324.0" height="20.0" fill="#313244"/>
+<rect x="446.0" y="186.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="200.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="200.8" textLength="99.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-06 ..</text>
+<text x="122.0" y="200.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="131.0" y="200.8" textLength="306.0" lengthAdjust="spacingAndGlyphs" fill="#cdd6f4" xml:space="preserve"> Deploy build #4821 to production?</text>
+<text x="437.0" y="200.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="545.0" y="200.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="206.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<rect x="122.0" y="206.0" width="324.0" height="20.0" fill="#313244"/>
+<rect x="446.0" y="206.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="220.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="220.8" textLength="99.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-07 ..</text>
+<text x="122.0" y="220.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="437.0" y="220.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="545.0" y="220.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="226.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<rect x="122.0" y="226.0" width="45.0" height="20.0" fill="#313244"/>
+<rect x="167.0" y="226.0" width="18.0" height="20.0" fill="#a6e3a1"/>
+<rect x="185.0" y="226.0" width="117.0" height="20.0" fill="#313244"/>
+<rect x="302.0" y="226.0" width="27.0" height="20.0" fill="#f38ba8"/>
+<rect x="329.0" y="226.0" width="117.0" height="20.0" fill="#313244"/>
+<rect x="446.0" y="226.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="240.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="240.8" textLength="99.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-08 ..</text>
+<text x="122.0" y="240.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="167.0" y="240.8" textLength="18.0" lengthAdjust="spacingAndGlyphs" fill="#1e1e2e" font-weight="600" xml:space="preserve">Y </text>
+<text x="185.0" y="240.8" textLength="117.0" lengthAdjust="spacingAndGlyphs" fill="#cdd6f4" xml:space="preserve">  confirm    </text>
+<text x="302.0" y="240.8" textLength="27.0" lengthAdjust="spacingAndGlyphs" fill="#1e1e2e" font-weight="600" xml:space="preserve"> N </text>
+<text x="329.0" y="240.8" textLength="108.0" lengthAdjust="spacingAndGlyphs" fill="#cdd6f4" xml:space="preserve">  cancel    </text>
+<text x="437.0" y="240.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="545.0" y="240.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="246.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<rect x="122.0" y="246.0" width="324.0" height="20.0" fill="#313244"/>
+<rect x="446.0" y="246.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="260.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="260.8" textLength="99.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-09 ..</text>
+<text x="122.0" y="260.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="437.0" y="260.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="545.0" y="260.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="266.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<rect x="122.0" y="266.0" width="324.0" height="20.0" fill="#313244"/>
+<rect x="446.0" y="266.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="280.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="280.8" textLength="99.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-10 ..</text>
+<text x="122.0" y="280.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="437.0" y="280.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">║</text>
+<text x="545.0" y="280.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="286.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<rect x="122.0" y="286.0" width="324.0" height="20.0" fill="#313244"/>
+<rect x="446.0" y="286.0" width="108.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="300.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="300.8" textLength="99.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-11 ..</text>
+<text x="122.0" y="300.8" textLength="324.0" lengthAdjust="spacingAndGlyphs" fill="#cba6f7" xml:space="preserve">╚══════════════════════════════════╝</text>
+<text x="545.0" y="300.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="306.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="320.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="320.8" textLength="225.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-12 ......... queued</text>
+<text x="545.0" y="320.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="326.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="340.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="340.8" textLength="225.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-13 ......... queued</text>
+<text x="545.0" y="340.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="346.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="360.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="360.8" textLength="225.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-14 ......... queued</text>
+<text x="545.0" y="360.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="366.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="380.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<text x="23.0" y="380.8" textLength="225.0" lengthAdjust="spacingAndGlyphs" fill="#585b70" xml:space="preserve">stage-15 ......... queued</text>
+<text x="545.0" y="380.8" textLength="9.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">│</text>
+<rect x="14.0" y="386.0" width="540.0" height="20.0" fill="#1e1e2e"/>
+<text x="14.0" y="400.8" textLength="540.0" lengthAdjust="spacingAndGlyphs" fill="#45475a" xml:space="preserve">╰──────────────────────────────────────────────────────────╯</text>
+    </g>
+  </g>
+</svg>

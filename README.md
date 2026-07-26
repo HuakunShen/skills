@@ -4,6 +4,7 @@ npx skills add https://github.com/HuakunShen/skills
 
 ## Skills
 
+- `building-codebase-curriculum`: turn a codebase that already works into runnable, step-by-step lessons.
 - `cloudflare-monorepo`: multi-Cloudflare-Worker monorepo patterns.
 - `deepwiki-badge`: generate and insert DeepWiki badges.
 - `journal`: document recent changes and decisions.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Slidev Narrated Video"
+  short_description: "Render verified narrated Slidev MP4s locally"
+  default_prompt: "Use $slidev-narrated-video to turn this Slidev deck into a locally narrated, verified MP4."

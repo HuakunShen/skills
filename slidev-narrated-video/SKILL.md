@@ -73,9 +73,17 @@ Never couple a specific TTS provider—or an operating-system voice—to `narrat
 
 Read [references/tts-provider-adapter.md](references/tts-provider-adapter.md) before generating, replacing, or evaluating narration. It routes the HyperFrames media-use audio engine and Remotion caption support without requiring the final video renderer to become a TTS client.
 
+Resolve the narration method in this exact order:
+
+1. **User-provided method wins.** If the user names a provider, voice, recording workflow, local model, or adapter, use that method exactly. Validate its segment-keyed local output; do not silently fall back to another provider.
+2. **No method supplied uses the skill default.** Generate locally with HyperFrames Kokoro-82M, using `am_michael` for English technical narration at a measured, reviewable pace. Invoke the media-use audio engine with `--provider kokoro`, never `provider:auto`; `auto` can choose a cloud service merely because credentials are present.
+3. **If the default is unavailable, stop with its setup diagnostic.** Do not silently substitute macOS `say`, a cloud provider, or a different voice. The user can then provide a method or explicitly authorize a different route.
+
+Keep selection outside `script.yaml`: it changes the sound production, never the slide/click semantics. For a project implementation, represent it as an ignored local adapter configuration with a named provider and bounded options; pass arguments as an argv array, never an interpolated shell command.
+
 Use this acceptance loop:
 
-1. Pick a provider route that fits quality, language, cost, privacy, and timestamp needs.
+1. Resolve the user-provided method or the explicit local default; record provider, voice, engine/model, language, and pace locally.
 2. Synthesize two or three representative segments: opening, dense technical explanation, and closing.
 3. Listen before batch generation. Revise script punctuation, pacing, pronunciation, or voice selection rather than speeding up dense speech later.
 4. Generate the approved per-segment audio outside the render command; normalize it to the project's audio contract and retain provider/voice/model metadata locally.

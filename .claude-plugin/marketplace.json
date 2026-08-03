@@ -1,0 +1,72 @@
+{
+  "name": "huakun-skills",
+  "owner": {
+    "name": "Huakun Shen",
+    "url": "https://github.com/HuakunShen"
+  },
+  "metadata": {
+    "description": "Huakun's personal agent skills collection",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "agent-engineering",
+      "description": "Build, extend, port, and test coding-agent plugins: skills, commands, hooks, MCP wiring, subagent orchestration, and cross-harness portability",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/agent-engineering/injecting-agent-behavior",
+        "./skills/agent-engineering/building-agent-orchestration",
+        "./skills/agent-engineering/writing-opencode-plugins",
+        "./skills/agent-engineering/porting-agent-plugins-across-harnesses",
+        "./skills/agent-engineering/testing-agent-plugins"
+      ]
+    },
+    {
+      "name": "app-development",
+      "description": "Building applications: HarmonyOS NEXT / ArkTS mobile apps, Rust terminal UIs with ratatui, SvelteKit + shadcn-svelte monorepos, and iroh peer-to-peer networking",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/app-development/harmonyos-app-patterns",
+        "./skills/app-development/ratatui-dev",
+        "./skills/app-development/shadcn-svelte-monorepo",
+        "./skills/app-development/iroh-development"
+      ]
+    },
+    {
+      "name": "cloudflare",
+      "description": "Cloudflare edge stack: multi-Worker pnpm/turbo monorepos, AI Search manual document sync, and RAG chat agents for Fumadocs sites",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/cloudflare/cloudflare-monorepo",
+        "./skills/cloudflare/cloudflare-ai-search-manual-sync",
+        "./skills/cloudflare/cloudflare-fumadocs-rag-agent"
+      ]
+    },
+    {
+      "name": "documentation",
+      "description": "Capture and publish what a repo knows: dated engineering journals, .repowiki sync, and DeepWiki badges",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/documentation/journal",
+        "./skills/documentation/sync-wiki",
+        "./skills/documentation/building-codebase-curriculum",
+        "./skills/documentation/deepwiki-badge"
+      ]
+    },
+    {
+      "name": "tooling",
+      "description": "Standalone developer utilities: scrub AI co-author trailers from git history, drive a real logged-in ChatGPT session in Chrome, and turn Slidev decks into narrated MP4s",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/tooling/strip-ai-coauthors",
+        "./skills/tooling/chatgpt-external-chrome",
+        "./skills/tooling/slidev-narrated-video"
+      ]
+    }
+  ]
+}

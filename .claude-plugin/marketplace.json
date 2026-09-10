@@ -64,6 +64,7 @@
       "strict": false,
       "skills": [
         "./skills/tooling/strip-ai-coauthors",
+        "./skills/tooling/mac-storage-audit-and-dev-migration",
         "./skills/tooling/chatgpt-external-chrome",
         "./skills/tooling/slidev-narrated-video"
       ]

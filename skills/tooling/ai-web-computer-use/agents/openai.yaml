@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Web Computer Use"
+  short_description: "Operate ChatGPT, Gemini, or NotebookLM with Computer Use"
+  default_prompt: "Use $ai-web-computer-use to operate the requested logged-in AI web session with Computer Use only."

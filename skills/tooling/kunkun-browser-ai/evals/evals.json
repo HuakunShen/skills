@@ -1,0 +1,20 @@
+{
+  "skill_name": "kunkun-browser-ai",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Ask ChatGPT one quick question in my logged-in browser and return the answer; do not start Kunkun unless the task needs artifacts or a durable queue.",
+      "expected_output": "Chooses the official ChatGPT Chat path, keeps Work disabled, and does not invent a Kunkun MCP call for a one-off answer."
+    },
+    {
+      "id": 2,
+      "prompt": "Use Kunkun to ask ChatGPT and Gemini the same research question, wait for both answers, and download any generated files.",
+      "expected_output": "Uses the Kunkun Browser AI MCP loop, keeps provider jobs separate, waits for terminal evidence, and materializes owned artifacts rather than fetching raw provider URLs."
+    },
+    {
+      "id": 3,
+      "prompt": "The provider UI changed and the browser task cannot find the send button. Diagnose it without blindly retrying or claiming success.",
+      "expected_output": "Inspects current state, applies bounded semantic/AX fallback, reports needs_manual when evidence is insufficient, and does not resend an ambiguous prompt."
+    }
+  ]
+}

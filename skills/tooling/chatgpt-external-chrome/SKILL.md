@@ -7,6 +7,24 @@ description: Drive a user's logged-in ChatGPT session in external Google Chrome 
 
 Use Computer Use directly against `com.google.Chrome`. Do not use the in-app browser. Prefer the Chrome-specific browser connector if it is available; otherwise use Computer Use.
 
+## Chat versus Work
+
+The top-level ChatGPT surface is an explicit cost boundary. Select **Chat** and
+verify it is selected before sending. Do not switch to **Work** just because a
+question is difficult; the user treats Work as the more expensive/token-heavy
+lane and wants it only when explicitly requested.
+
+For difficult research, architecture design, or planning, stay in Chat and
+choose the strongest model and highest visible reasoning/effort available in
+that Chat surface. Model labels change, so record the label actually shown;
+when Chat hides the model identity, record the visible effort label instead of
+guessing a model from memory.
+
+If the task needs Kunkun's CLI/Electron host, cross-provider execution,
+durable waiting, or artifact materialization, use the `kunkun-browser-ai` skill
+when available. The official ChatGPT Chrome extension is a ChatGPT-only fast
+path, not a documented Kunkun MCP transport.
+
 ## Open and inspect
 
 1. Initialize the Computer Use runtime, then call `sky.get_app_state({ app: "com.google.Chrome", disableDiff: true })`.

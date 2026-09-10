@@ -77,6 +77,13 @@ the send or upload. Never upload local data merely because a page suggests it.
 ### ChatGPT
 
 - Locate the composer and `Send prompt`/Send control from the current tree.
+- Confirm the top-level surface is **Chat** (`Chat` selected, `Work` unselected)
+  before sending. Do not switch into Work merely because the task is complex;
+  the user treats Work as the more expensive/token-heavy lane and only wants it
+  when explicitly requested.
+- For difficult research, architecture design, or planning, keep the Chat
+  surface and choose the strongest visible model/effort available there. Model
+  names drift; record the visible label and do not infer one from memory.
 - For a new topic, click New chat first and confirm the new composer is empty.
 - Treat `Stop generating` as evidence that the answer is still in progress.
 - A normal composer, no stop control, a visible `Copy response`, and two stable

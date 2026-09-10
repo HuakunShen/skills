@@ -57,6 +57,7 @@ Standalone developer utilities.
 
 - `strip-ai-coauthors`: remove AI/agent co-author trailers from git commit history safely.
 - `chatgpt-external-chrome`: drive a logged-in ChatGPT session in external Chrome and return the answer.
+- `ai-web-computer-use`: use Computer Use alone to operate logged-in ChatGPT, Gemini, and NotebookLM sessions, including generation and visible downloads.
 - `mac-storage-audit-and-dev-migration`: audit macOS disk usage and safely migrate Android/HarmonyOS developer data while protecting iCloud placeholders.
 - `slidev-narrated-video`: turn a Slidev deck into an audio-synchronized MP4.
 

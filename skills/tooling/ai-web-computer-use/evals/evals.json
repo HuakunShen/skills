@@ -1,0 +1,23 @@
+{
+  "skill_name": "ai-web-computer-use",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Use my logged-in ChatGPT tab to ask two related questions in one session, wait for each answer, then generate an image and download it.",
+      "expected_output": "Uses only visible Computer Use interactions, keeps both questions in order, waits for stable answers, handles the image through visible controls, verifies the browser download, and reports any remaining evidence gap.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Open Gemini and ask it to explain a topic, then create a new chat for an unrelated topic and download the generated image.",
+      "expected_output": "Separates topics with New chat, verifies each prompt before sending, waits for generation to finish, uses the visible image download flow, and does not use DOM/API/cookie shortcuts.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "In my logged-in NotebookLM notebook, ask two questions and create a Video Overview; download it when ready.",
+      "expected_output": "Selects the requested notebook, waits between questions, waits for the Studio card to become ready, uses More then Download, verifies browser completion, and asks before any login/source/permission action.",
+      "files": []
+    }
+  ]
+}

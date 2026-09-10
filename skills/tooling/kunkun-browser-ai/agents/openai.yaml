@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kunkun Browser AI"
+  short_description: "Use Kunkun MCP for durable browser AI workflows"
+  default_prompt: "Use $kunkun-browser-ai to choose the right ChatGPT/Kunkun/Computer Use browser lane and run the verified Kunkun workflow."

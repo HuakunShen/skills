@@ -13,6 +13,22 @@ group row) or individual skills. The repo also works as a Claude Code plugin mar
 /plugin marketplace add HuakunShen/skills
 ```
 
+## Codex / ChatGPT
+
+The repo also exposes a Codex-compatible catalog at
+`.agents/plugins/marketplace.json` (one plugin per category, portable
+`plugin.json` + `skills/` layout; each skill entry is a symlink to the real
+`skills/<category>/<skill>` directory, so there is a single source of truth).
+Install the whole repo as a marketplace, then enable the plugins you want:
+
+```bash
+codex plugin marketplace add HuakunShen/skills
+```
+
+Install with a full clone, not a `--sparse .agents/plugins` checkout — the
+`skills/` entries are symlinks into the repo-root `skills/` tree and go
+dangling under a partial checkout.
+
 ## Categories
 
 ### Agent Engineering — `skills/agent-engineering`
@@ -60,6 +76,7 @@ Standalone developer utilities.
 - `ai-web-computer-use`: use Computer Use alone to operate logged-in ChatGPT, Gemini, and NotebookLM sessions, including generation and visible downloads.
 - `kunkun-browser-ai`: choose between ChatGPT Chat, Kunkun's durable Browser AI MCP, and Computer Use fallback; operate Kunkun's cross-provider browser workflows and artifact boundary.
 - `mac-storage-audit-and-dev-migration`: audit macOS disk usage and safely migrate Android/HarmonyOS developer data while protecting iCloud placeholders.
+- `external-mobile-sdks`: resolve this Mac's Android/HarmonyOS SDKs and emulators through the Portable2TB external-disk symlink layer.
 - `slidev-narrated-video`: turn a Slidev deck into an audio-synchronized MP4.
 
 ## Layout

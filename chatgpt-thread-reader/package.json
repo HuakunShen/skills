@@ -1,9 +1,0 @@
-{
-  "name": "chatgpt-thread-reader-poc",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "test": "node --experimental-strip-types --test test/*.test.ts",
-    "parse": "node --experimental-strip-types scripts/read-chatgpt-thread.ts --mode parse"
-  }
-}

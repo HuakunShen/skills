@@ -78,6 +78,7 @@ Standalone developer utilities.
 - `mac-storage-audit-and-dev-migration`: audit macOS disk usage and safely migrate Android/HarmonyOS developer data while protecting iCloud placeholders.
 - `external-mobile-sdks`: resolve this Mac's Android/HarmonyOS SDKs and emulators through the Portable2TB external-disk symlink layer.
 - `slidev-narrated-video`: turn a Slidev deck into an audio-synchronized MP4.
+- `youtube-podcast-tracker`: track YouTube/Bilibili channels and route new videos to summary podcasts or explicit audio playlists.
 
 ## Layout
 

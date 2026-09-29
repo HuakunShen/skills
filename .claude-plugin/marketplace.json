@@ -69,7 +69,8 @@
         "./skills/tooling/mac-storage-audit-and-dev-migration",
         "./skills/tooling/external-mobile-sdks",
         "./skills/tooling/chatgpt-external-chrome",
-        "./skills/tooling/slidev-narrated-video"
+        "./skills/tooling/slidev-narrated-video",
+        "./skills/tooling/youtube-podcast-tracker"
       ]
     }
   ]

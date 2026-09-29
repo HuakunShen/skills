@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube Podcast Tracker"
+  short_description: "Track channels and route videos to podcasts"
+  default_prompt: "Use $youtube-podcast-tracker to track configured YouTube or Bilibili channels and route new videos to summary podcasts or explicit audio playlists."

@@ -70,7 +70,8 @@
         "./skills/tooling/external-mobile-sdks",
         "./skills/tooling/chatgpt-external-chrome",
         "./skills/tooling/slidev-narrated-video",
-        "./skills/tooling/youtube-podcast-tracker"
+        "./skills/tooling/youtube-podcast-tracker",
+        "./skills/tooling/agent-session-speed"
       ]
     }
   ]

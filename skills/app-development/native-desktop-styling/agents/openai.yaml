@@ -1,0 +1,4 @@
+interface:
+  display_name: "Native Desktop Styling"
+  short_description: "Platform-specific UI for macOS, WinUI and GNOME"
+  default_prompt: "Use $native-desktop-styling to adapt this app to macOS, Windows and Linux native UI conventions."

@@ -1,0 +1,45 @@
+// Pattern B - published package: tsdown build + types, published to npm for external users.
+// From kunkun/packages/sdk/package.json (exports/scripts/files excerpt, read 2026-10-05).
+// Published packages go straight to the community's strictest preset: @tsconfig/strictest/tsconfig.json.
+{
+  "name": "@kunkunsh/sdk",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Kunkun plugin SDK — APIs, runtime bootstraps, build helpers, and test/headless utilities for Kunkun plugins.",
+  "author": "KunkunSH",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kunkunsh/kunkun.git",
+    "directory": "packages/sdk"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./api": {
+      "types": "./dist/api/index.d.ts",
+      "import": "./dist/api/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest/index.d.ts",
+      "import": "./dist/manifest/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsdown && pnpm run generate-schema",
+    "dev": "tsdown --watch",
+    "check": "pnpm run typecheck",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "manifest-schema.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

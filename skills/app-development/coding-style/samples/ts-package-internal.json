@@ -1,0 +1,20 @@
+// Pattern A - internal package: exports point straight at src, no build script.
+// From refyard/packages/git-core/package.json (full file, read 2026-10-05).
+// Traits: private: true + version: 0.0.0 + workspace:* cross-references + scripts containing only check.
+// Same shape: kunkun packages/core, space-lens packages/contract, xross @xross/sdk.
+{
+  "name": "@refyard/git-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@refyard/git-contract": "workspace:*"
+  }
+}

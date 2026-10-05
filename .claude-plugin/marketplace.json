@@ -24,14 +24,15 @@
     },
     {
       "name": "app-development",
-      "description": "Building applications: HarmonyOS NEXT / ArkTS mobile apps, Rust terminal UIs with ratatui, SvelteKit + shadcn-svelte monorepos, and iroh peer-to-peer networking",
+      "description": "Building applications: HarmonyOS NEXT / ArkTS mobile apps, Rust terminal UIs with ratatui, SvelteKit + shadcn-svelte monorepos, iroh peer-to-peer networking, and the owner's personal coding-style standards",
       "source": "./",
       "strict": false,
       "skills": [
         "./skills/app-development/harmonyos-app-patterns",
         "./skills/app-development/ratatui-dev",
         "./skills/app-development/shadcn-svelte-monorepo",
-        "./skills/app-development/iroh-development"
+        "./skills/app-development/iroh-development",
+        "./skills/app-development/coding-style"
       ]
     },
     {

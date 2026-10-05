@@ -32,7 +32,8 @@
         "./skills/app-development/ratatui-dev",
         "./skills/app-development/shadcn-svelte-monorepo",
         "./skills/app-development/iroh-development",
-        "./skills/app-development/coding-style"
+        "./skills/app-development/coding-style",
+        "./skills/app-development/native-desktop-styling"
       ]
     },
     {

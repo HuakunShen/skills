@@ -1,6 +1,6 @@
 ---
 name: agent-session-speed
-description: Use when the user asks how fast their AI coding agent is, wants token-per-second (tps) throughput, time-to-first-token (TTFT) latency, or per-model/per-day speed stats from local session logs — e.g. "analyze my codex speed", "how many tokens per second does my agent run at", "which model streams faster", "analyze zcode/opencode/dsh session performance". Parses OpenAI Codex rollout JSONL, ZCode db.sqlite, OpenCode db.sqlite, and DSH (DeepSeek Harness) session.v4.jsonl.zstd. Not for API-benchmark load testing or web perf.
+description: Use when the user asks how fast their AI coding agent is, wants token-per-second (tps) throughput, time-to-first-token (TTFT) latency, or per-model/per-day speed stats from local session logs — e.g. "analyze my codex speed", "how many tokens per second does my agent run at", "which model streams faster", "analyze zcode/opencode/dsh/claude session performance". Parses OpenAI Codex rollout JSONL, ZCode db.sqlite, OpenCode db.sqlite, DSH (DeepSeek Harness) session.v4.jsonl.zstd, and Claude Code projects JSONL. Not for API-benchmark load testing or web perf.
 license: MIT
 compatibility: Node 22.5+ / Bun 1.1+ / Deno 2.2+ (built-in sqlite and zstd, zero dependencies)
 metadata:
@@ -34,12 +34,15 @@ the logs are the data source.
 | zcode    | `~/.zcode/cli/db/db.sqlite` (`model_usage`, `turn_usage` tables)     | per model request **and** per turn |
 | opencode | `~/.local/share/opencode/opencode.db` (`session_message` JSON blobs) | per assistant message |
 | dsh      | `~/.dsh/sessions/*/*/session-*/session.v4.jsonl.zstd`                | per model response (stream timeline) **and** per turn |
+| claude   | `~/.claude/projects/**/*.jsonl` (incl. `subagents/`)                 | per response (block-write spans, noisy) + official session aggregate |
 
 ZCode and dsh have the best data: zcode's `model_usage.duration_ms` is a
 single model API call, and dsh records the full streaming chunk timeline per
 response — both give true pure model speed. Codex has no per-request timing —
 only whole-turn duration — so its "pure speed" is proxied by single-response
-turns (see methodology).
+turns (see methodology). Claude Code logs no per-response duration at all;
+its span-based rows are noisy and the trustworthy headline is the official
+`cost-state` aggregate (printed to stderr).
 
 ## Quick start
 
@@ -47,6 +50,7 @@ turns (see methodology).
 node scripts/analyze_session_speed.ts --agent zcode
 bun  scripts/analyze_session_speed.ts --agent dsh
 deno run --allow-read --allow-env scripts/analyze_session_speed.ts --agent opencode
+node scripts/analyze_session_speed.ts --agent claude   # note the stderr aggregate line
 # CSV detail (deno also needs --allow-write for --out-csv):
 node scripts/analyze_session_speed.ts --agent codex --out-csv turns.csv
 ```
@@ -97,9 +101,7 @@ One JSON object per line. Events the parser needs:
   `thread_token_usage.input_tokens` (final context size).
 - `event_msg` payloads `task_started` / `task_complete` — `duration_ms`,
   `time_to_first_token_ms`. Response count per `turn_id` distinguishes
-  single- from multi-response turns.
-
-### ZCode `~/.zcode/cli/db/db.sqlite` (epoch-ms timestamps, read-only open)
+  single- from multi-response turns.### ZCode `~/.zcode/cli/db/db.sqlite` (epoch-ms timestamps, read-only open)
 
 - `model_usage` — one row per model API request: `started_at`, `duration_ms`,
   `time_to_first_token_ms`, `input/output/reasoning/cache_*_tokens`,
@@ -141,6 +143,30 @@ JSON object per line, `type` field, epoch-ms `time`):
 - `turn/start` / `turn/end` — turn boundaries; `end.reason.kind ===
   "completed"` distinguishes finished turns; attribute the dominant model by
   output tokens.
+
+### Claude Code `~/.claude/projects/<workspace>/*.jsonl` (+ `subagents/*.jsonl`)
+
+One JSON object per line, `type` field, ISO `timestamp`. One API response
+(message.id, one requestId) is written as MULTIPLE `type='assistant'` lines —
+one per content block as it completes — each carrying the same FINAL
+`message.usage` (`input_tokens`, `cache_creation_input_tokens`,
+`cache_read_input_tokens`, `output_tokens`,
+`output_tokens_details.thinking_tokens`). Group by message.id:
+`tps = output_tokens / (lastLine − firstLine)`. Heavy caveats:
+
+- The span runs between block-completion writes, so it swallows thinking
+  pauses between blocks — small responses measure far too slow (medians of
+  a few tps), while large (≥500-token) responses approximate the sustained
+  stream rate.
+- Single-line responses have a zero window — unmeasurable, filtered out.
+- Broken stream attempts appear as tiny outputs over 60s+ spans (a thinking
+  line followed by a late tool_use line) — the `tps > 500` filter catches
+  fast garbage; slow garbage survives, so read the distribution with care.
+- `type='cost-state'` lines hold the official per-session totals
+  (`totalAPIDurationWithoutRetries`, `modelUsage.*.outputTokens`) — the
+  parser prints their aggregate to stderr; `totalAPIDuration` is session-wide
+  across models, so aggregate per session, never per model.
+- No turn boundaries exist in the format — no turn-level rows.
 
 ## Porting to another agent
 

@@ -601,6 +601,124 @@ async function parseDsh(sessionsDir: string): Promise<Row[]> {
   return rows;
 }
 
+// Claude Code session logs: ~/.claude/projects/<workspace-slug>/*.jsonl
+// (the subagents/ subdirectory holds subagent transcripts — same format,
+// included). One JSON object per line; type='assistant' lines carry
+// message.model, message.usage {input_tokens, cache_creation_input_tokens,
+// cache_read_input_tokens, output_tokens, output_tokens_details.thinking_tokens}
+// and an ISO `timestamp`. One API response is written as MULTIPLE assistant
+// lines (one per content block as it arrives), each carrying the same final
+// usage — so group by message.id: t0 = first line, tN = last line, and
+// tps = output_tokens / (tN − t0) is the streaming window (≈ pure decode,
+// excludes TTFT). Responses written as a single line have a zero window and
+// are unmeasurable. There are no turn boundaries in the format, so no
+// turn-level rows; `cost-state` lines hold per-session cumulative totals
+// (totalAPIDuration etc.) for cross-checking only.
+async function parseClaude(sessionsDir: string): Promise<Row[]> {
+  const { readdirSync, readFileSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const root = sessionsDir.replace(/^~/, process.env.HOME ?? "~");
+  if (!existsSync(root)) throw new Error(`claude projects dir not found: ${root}`);
+  const files: string[] = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const d = stack.pop()!;
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) stack.push(p);
+      else if (e.name.endsWith(".jsonl")) files.push(p);
+    }
+  }
+  console.error(`claude session files: ${files.length}`);
+
+  type Agg = { t0: number; tN: number; out: number; input: number; thinking: number; model: string; day: string };
+  const rows: Row[] = [];
+  // Official per-session totals from cost-state — the trustworthy aggregate,
+  // since Claude Code measures API duration per call server-side.
+  // totalAPIDuration is session-wide (all models), so aggregate per session
+  // file: sum(outputTokens) / sum(apiMs) — never per model.
+  const sessionAgg: { out: number; apiMs: number; thinking: number; sessions: number } = {
+    out: 0, apiMs: 0, thinking: 0, sessions: 0,
+  };
+  for (const fp of files) {
+    const msgs = new Map<string, Agg>();
+    let content: string;
+    try {
+      content = readFileSync(fp, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of content.split("\n")) {
+      if (line.length === 0) continue;
+      let rec: any;
+      try {
+        rec = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (rec.type === "cost-state") {
+        const apiMs = num(rec.totalAPIDurationWithoutRetries) || num(rec.totalAPIDuration);
+        if (apiMs > 0) {
+          let out = 0;
+          let thinking = 0;
+          for (const mu of Object.values<any>(rec.modelUsage ?? {})) {
+            out += num(mu.outputTokens);
+            thinking += num(mu.thinkingTokens);
+          }
+          sessionAgg.out += out;
+          sessionAgg.thinking += thinking;
+          sessionAgg.apiMs += apiMs;
+          sessionAgg.sessions += 1;
+        }
+        continue;
+      }
+      if (rec.type !== "assistant") continue;      const m = rec.message ?? {};
+      const mid: string = m.id ?? rec.requestId;
+      if (!mid) continue;
+      const ts = Date.parse(rec.timestamp ?? "");
+      if (!Number.isFinite(ts)) continue;
+      const u = m.usage ?? {};
+      const out = num(u.output_tokens);
+      const input = num(u.input_tokens) + num(u.cache_creation_input_tokens) + num(u.cache_read_input_tokens);
+      const thinking = num(u.output_tokens_details?.thinking_tokens);
+      const day = new Date(ts).toISOString().slice(0, 10);
+      const a = msgs.get(mid);
+      if (a === undefined) {
+        msgs.set(mid, { t0: ts, tN: ts, out, input, thinking, model: String(m.model ?? "unknown"), day });
+      } else {
+        a.t0 = Math.min(a.t0, ts);
+        a.tN = Math.max(a.tN, ts);
+        a.out = Math.max(a.out, out);
+      }
+    }
+    for (const a of msgs.values()) {
+      rows.push(
+        makeRow({
+          agent: "claude",
+          level: "request",
+          model: a.model,
+          day: a.day,
+          outTokens: a.out,
+          inputTokens: a.input,
+          reasoningTokens: a.thinking,
+          steps: 1,
+          durMs: a.tN - a.t0,
+          ttftMs: 0, // first line is written at the first block; pre-stream latency is not logged
+        }),
+      );
+    }
+  }
+  console.error(`claude responses: ${rows.length}`);
+  if (sessionAgg.apiMs > 0 && sessionAgg.out > 0) {
+    console.error(
+      `official aggregate: ${sessionAgg.out.toLocaleString()} output tokens ` +
+        `(${Math.round(sessionAgg.thinking / 1000)}k thinking) over ${(sessionAgg.apiMs / 1000).toFixed(0)}s API time ` +
+        `across ${sessionAgg.sessions} sessions → ${(sessionAgg.out / (sessionAgg.apiMs / 1000)).toFixed(1)} tps`,
+    );
+  }
+  return rows;
+}
+
 // ---------- CLI ----------
 
 interface Args {
@@ -659,8 +777,11 @@ async function main(): Promise<number> {
   } else if (args.agent === "dsh") {
     const dirs = args.sessionsDir.length > 0 ? args.sessionsDir : [`${home}/.dsh/sessions`];
     rows = await parseDsh(dirs[0]);
+  } else if (args.agent === "claude") {
+    const dirs = args.sessionsDir.length > 0 ? args.sessionsDir : [`${home}/.claude/projects`];
+    rows = await parseClaude(dirs[0]);
   } else {
-    console.error(`unsupported agent: ${args.agent} (supported: codex, zcode, opencode, dsh)`);
+    console.error(`unsupported agent: ${args.agent} (supported: codex, zcode, opencode, dsh, claude)`);
     return 1;
   }
   if (rows.length === 0) {
@@ -673,10 +794,11 @@ async function main(): Promise<number> {
   const speed = rows.filter((r) => (args.agent === "codex" ? r.level === "turn" && r.steps === 1 : r.level === "request"));
   const turns = rows.filter((r) => r.level === "turn");
 
-  const speedLabel =
-    args.agent === "codex"
-      ? "PURE-SPEED proxy: single-response turns (~model speed, no tool gaps)"
-      : "PURE MODEL SPEED (request-level, no tool time)";
+  const speedLabels: Record<string, string> = {
+    codex: "PURE-SPEED proxy: single-response turns (~model speed, no tool gaps)",
+    claude: "STREAMING-WINDOW proxy (block-write spans; noisy for small responses — check official aggregate)",
+  };
+  const speedLabel = speedLabels[args.agent] ?? "PURE MODEL SPEED (request-level, no tool time)";
   summarize(speed, speedLabel, minGenMs);
   summarize(turns, "END-TO-END TURNS (agent loop, incl. tool time)", minGenMs);
   byModel(speed, minGenMs);

@@ -1,0 +1,18 @@
+# Structural isolation: the desktop shell is an independent second Cargo workspace.
+# From refyard-native-desktop-ssh/apps/desktop/src-tauri/Cargo.toml:1-15 (read 2026-10-05).
+# The root workspace's default-members contains only headless crates, so a bare cargo build never pulls in the WebView.
+# The desktop shell is its own workspace, and that is the point of this file.
+#
+# `cargo build` at the repository root must never need a WebView: the headless crates are
+# what the CLI and the HTTP host are built from, and none of them may depend on `wry`,
+# WebKit, AppKit or a windowing system. Keeping the desktop crate in a separate workspace
+# makes that structural — the root workspace cannot see these dependencies, so nothing in
+# `crates/` can reach them by accident.
+#
+# Nothing here links a JavaScript engine: the frontend is compiled into the binary as
+# static assets, and every call from the WebView arrives over Tauri's own IPC.
+[workspace]
+
+[package]
+name = "refyard-desktop"
+version = "0.1.2"

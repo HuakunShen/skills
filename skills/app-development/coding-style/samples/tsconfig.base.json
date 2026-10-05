@@ -1,0 +1,24 @@
+// From refyard/tsconfig.base.json (single base for the whole repo, extended by every package; lines 1-24, read 2026-10-05)
+// Purpose: the base tsconfig template for a new TS monorepo - the flags that must stack on top of strict.
+// Traits: noEmit (type-checking split from building), types: [] (no host global types loaded - portability locked down).
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true
+  }
+}

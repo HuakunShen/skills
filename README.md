@@ -49,6 +49,7 @@ Building applications, across mobile, terminal, web, and peer-to-peer.
 - `ratatui-dev`: good-looking Rust terminal UIs with ratatui and crossterm.
 - `shadcn-svelte-monorepo`: shadcn-svelte in a pnpm/SvelteKit monorepo with a shared UI package.
 - `iroh-development`: peer-to-peer apps with iroh (QUIC, NAT traversal, blobs, gossip, docs).
+- `coding-style`: Huakun's personal coding standards — modularity, type safety, library/app splits, monorepo structure, and the TS/Rust/Go language-choice matrix, distilled from his real repositories.
 
 ### Cloudflare — `skills/cloudflare`
 

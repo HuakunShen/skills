@@ -58,3 +58,12 @@ The prompt includes:
 - the specific regressions to look for;
 - "Report only actionable P1/P2. Output: verdict PASS / PASS WITH FIXES / FAIL, then findings with file:line and a fix."
 - For the third and final round, say so: under the convergence rule, P1s that remain afterwards become test-first RED items.
+
+## Pitfall: chaining prompts with search-and-replace (root error, 2026-10-11)
+
+Do not make the next task's prompt by running a global `sed s/Task N/Task N+1/g` over the previous one. It also rewrites the "already committed" list, so a commit shows up labelled as the task about to run. A worker could then believe the task is done. This happened twice in one night; both runs were caught and killed before any edit.
+
+Instead:
+- generate each prompt from a template with explicit variables (`TASK`, `DONE_LIST`, `EXTRA_RULES`);
+- or grep every `(Task N.M)` label before launching;
+- always read the first 15 lines of the rendered prompt before you start the run.

@@ -67,3 +67,12 @@ Instead:
 - generate each prompt from a template with explicit variables (`TASK`, `DONE_LIST`, `EXTRA_RULES`);
 - or grep every `(Task N.M)` label before launching;
 - always read the first 15 lines of the rendered prompt before you start the run.
+
+## Pitfall: resuming the wrong opencode session (root error, 2026-10-12)
+
+`opencode session list` is global across directories and sorted by recency. When parallel opencode runs go in different worktrees, `head -1` returns whichever ran last, which may belong to another lane. Resuming it from a different cwd starts a second concurrent run on that session.
+
+Always:
+- record each run's session id when it starts (from `session list`, matched by its title);
+- resume by that explicit id;
+- never resume with `head -1`.

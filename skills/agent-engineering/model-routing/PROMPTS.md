@@ -43,6 +43,13 @@ For plan writing, add:
 - an example hand-off plan of the required detail;
 - "validate snippets by compiling them in a scratch copy, then revert";
 - "list owner decisions with a recommended default".
+- an explicit concurrency and crash checklist that the plan must answer, each item with a named test. Replay and mutation sweeps only exercise the plan's own single-request paths. On 2026-10-12, three plans that had been validated by replay still failed review on the same classes of issue:
+  - two concurrent requests or writers on the same object;
+  - a crash between "mark done" and "persist result";
+  - deletion or disable while work is in flight;
+  - a re-enable that runs startup recovery over live owners;
+  - client-supplied state trusted as server truth;
+  - state checked again after every await (epochs).
 
 ## codex reviewer (gpt-6.1-sol/high)
 

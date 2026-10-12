@@ -83,3 +83,24 @@ Always:
 - record each run's session id when it starts (from `session list`, matched by its title);
 - resume by that explicit id;
 - never resume with `head -1`.
+
+## Pitfall: background opencode runs can die mid-task (2026-10-12)
+
+Two of three parallel `opencode run` jobs exited at the same moment with code 144 (killed by a signal) and left uncommitted work. The third survived. A run also stopped silently once, mid-replay.
+
+What to do:
+- Always record the session id.
+- On any non-zero exit, or a report with no final summary, check `git status` in the worktree and resume with `-s <id>`. Tell it what state it was in and to re-record RED honestly if it was lost.
+- Per-task commits keep the loss to one task.
+
+Repeat (2026-10-12): a review prompt derived with `sed` from the previous phase's prompt kept that phase's numbered checklist ("S1 covers…", "S1's slot"). It was caught by reading the rendered prompt and the run was stopped within a minute. Write review checklists fresh for each phase; only copy the location and format lines.
+
+## Pitfall: replay of an edited copy, not the committed doc (2026-10-12)
+
+Twice tonight a plan author "replayed" the doc and then kept editing it. The S5 doc as committed failed to compile (a duplicate declaration) and had hooks after an early return, while the author reported green replays.
+
+Always require replay from `git show HEAD:<doc>` after the commit, and re-commit plus re-replay on any fix. Root can spot-check by extracting one task's code block and compiling it.
+
+## Pitfall: transient "free tier can only be used from within OpenCode" (2026-10-12)
+
+An `opencode run` on the free model exited 0 after this provider error, part-way through a task. A one-word probe right after succeeded. Exit 0 is not success: always read the log tail. On this error, probe with a trivial run, then resume with `-s <id>`.

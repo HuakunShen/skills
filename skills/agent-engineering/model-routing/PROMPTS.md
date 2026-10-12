@@ -104,3 +104,11 @@ Always require replay from `git show HEAD:<doc>` after the commit, and re-commit
 ## Pitfall: transient "free tier can only be used from within OpenCode" (2026-10-12)
 
 An `opencode run` on the free model exited 0 after this provider error, part-way through a task. A one-word probe right after succeeded. Exit 0 is not success: always read the log tail. On this error, probe with a trivial run, then resume with `-s <id>`.
+
+## Pitfall: opencode ends a plan-writing run before writing (2026-10-12)
+
+The S6 plan run read for a long time, then tried to write a very large doc in a single tool call. The tool rejected the arguments ("Update the arguments and call the tool again"), and the run exited 0 with no file and no commit.
+
+To avoid it, every plan-writing prompt should say: "write the doc in parts (create the file, then append sections); resolve uncertain details with one grep before writing; never leave conditional instructions."
+
+If it happens anyway, resume with `-s <id>` and tell the run to write now.

@@ -26,7 +26,7 @@ The owner's standing rule is to save quota. Do not reach for the strongest model
 | Claude Haiku 5.5 (`haiku`) | Claude Code / Claude Agent SDK only | low quota | Agent tool `model: "haiku"` |
 | Claude Sonnet 5.5 (`sonnet`) | Claude Code / Agent SDK only | medium quota | `model: "sonnet"`, `effort: medium/high` |
 | Claude Opus 5.5 (`opus`) | Claude Code / Agent SDK only | high quota | reserve; see §3 |
-| opencode `opencode/muse-spark-1.3-contributor-free` ("Muse Spark 1.3 Free") | opencode CLI (any harness with a shell) | free | owner rates it about Sonnet/high for execution |
+| opencode `opencode/muse-spark-1.3-contributor-free` ("Muse Spark 1.3 Free") | opencode CLI (any harness with a shell) | free | owner rates it about Sonnet/high for execution; reads images accurately (verified 2026-10-12 on a settings screenshot) |
 | gpt-6.1-sol, reasoning effort high | codex CLI (`codex exec`), any harness with a shell | OpenAI quota | independent reviewer; read-only |
 
 If the current harness has no Claude models (Codex, opencode, Cursor, another CLI), the Claude rows do not exist. Map the tiers like this:
@@ -73,6 +73,7 @@ Add a row whenever a new model or tool is tried, and record it in the ledger.
 | Write a spec plus a full-code hand-off plan | sonnet/high, with a sol review loop as the quality gate | opus only if sonnet fails the same review twice | opencode for security, lifecycle or native-integration plans |
 | New security or permission design | opus/medium, then sol review | — | haiku, opencode |
 | Independent milestone or plan review | codex gpt-6.1-sol/high | — | the model that wrote the code |
+| Visual/UI comparison from screenshots (read images, capture with Playwright, write proposal) | opencode | sonnet/medium | — |
 | Quick lookups, single grep, reading one file | do it yourself | — | any subagent |
 
 Effort defaults to medium; raise it only when correctness is hard.

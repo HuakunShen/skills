@@ -124,3 +124,7 @@ Plan prompts must ask for complete files, or for exact anchor replacements ("thi
 `codex exec -s workspace-write` cannot write git metadata in a linked worktree: it fails on `index.lock` and `ORIG_HEAD.lock`, even when `writable_roots` includes the repo, so it cannot commit, merge or create replay worktrees. Codex then reports itself blocked; it does not improvise.
 
 For writer tasks that need git, use `-s danger-full-access`, the same trust level as `opencode --auto`, with the usual write-set rules in the prompt. Keep `-s read-only` for reviews.
+
+## gpt-6.1-sol capacity (2026-10-12)
+
+With two sol/xhigh writer runs active, a third sol review died after 111k tokens with "Selected model is at capacity". Keep at most 2 concurrent sol runs. Use gpt-6-luna as the overflow reviewer, and retry sol later for gate reviews.

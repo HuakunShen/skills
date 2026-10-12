@@ -112,3 +112,9 @@ The S6 plan run read for a long time, then tried to write a very large doc in a 
 To avoid it, every plan-writing prompt should say: "write the doc in parts (create the file, then append sections); resolve uncertain details with one grep before writing; never leave conditional instructions."
 
 If it happens anyway, resume with `-s <id>` and tell the run to write now.
+
+## Pitfall: hand-written diff patches in plan docs (2026-10-12)
+
+The S8 revision run lost its time trying to make `git apply` patches with correct `@@` hunk headers inside the doc, then stopped mid-replay. While debugging it also edited a product file in the docs-only worktree.
+
+Plan prompts must ask for complete files, or for exact anchor replacements ("this block occurs once; replace it with this block"), never unified diffs. Docs-only lanes must name product files as forbidden, and root checks `git status` after every plan run.

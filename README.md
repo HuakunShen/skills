@@ -52,6 +52,7 @@ Building applications, across mobile, terminal, web, and peer-to-peer.
 - `coding-style`: Huakun's personal coding standards — modularity, type safety, library/app splits, monorepo structure, and the TS/Rust/Go language-choice matrix, distilled from his real repositories.
 
 - `native-desktop-styling`: adapt shared desktop UIs to macOS, WinUI and GNOME/KDE with component-level styling, responsive geometry checks, and native host verification.
+- `webview-native-look`: make an embedded WKWebView UI feel native on macOS (real vibrancy / Liquid Glass behind a transparent web view, system accent, OS-generation attributes, zoom, host bridge), with a runnable AppKit demo and measured findings.
 
 ### Cloudflare — `skills/cloudflare`
 

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Native Look Lab</title>
+  <link rel="stylesheet" href="native.css">
+</head>
+<body>
+  <div class="window">
+    <aside class="sidebar glass" aria-label="Sections">
+      <button class="nav" data-view="launcher" aria-current="page"><span class="dot"></span>Launcher</button>
+      <button class="nav" data-view="settings"><span class="dot"></span>Settings</button>
+      <button class="nav" data-view="lab"><span class="dot"></span>Lab</button>
+    </aside>
+
+    <main class="content">
+      <section data-panel="launcher">
+        <div class="palette glass">
+          <div class="search">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.5" opacity=".5"/><path d="M13.2 13.2L17 17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg>
+            <input type="text" placeholder="Search for apps or commands…" aria-label="Search">
+          </div>
+          <div class="group-title">Favorites</div>
+          <div class="row" role="option" aria-selected="true"><span class="icon">G</span>List Repos<span class="type">Command</span></div>
+          <div class="group-title">Suggestions</div>
+          <div class="row" role="option"><span class="icon">R</span>Refyard<span class="type">Application</span></div>
+          <div class="row" role="option"><span class="icon">A</span>Activity Monitor<span class="type">Application</span></div>
+          <div class="row" role="option"><span class="icon">S</span>System Settings<span class="type">Application</span></div>
+          <div class="footer"><span>Open Command<kbd>↵</kbd></span><span>Actions<kbd>⌘</kbd><kbd>K</kbd></span></div>
+        </div>
+      </section>
+
+      <section data-panel="settings" hidden>
+        <h1>General</h1>
+        <p class="lede">Rows, cards and controls drawn only with tokens from native.css.</p>
+        <div class="card">
+          <div class="setting"><span>Open at Login</span><button class="switch" role="switch" aria-checked="true" aria-label="Open at Login"></button></div>
+          <div class="setting"><span>Show in Menu Bar<small>Keep the launcher reachable when no window is open.</small></span><button class="switch" role="switch" aria-checked="false" aria-label="Show in Menu Bar"></button></div>
+          <div class="setting"><span>Hotkey</span><span><kbd>⌥</kbd><kbd>Space</kbd></span></div>
+        </div>
+        <div class="card">
+          <div class="setting"><span>Reset search history</span><button class="btn">Reset</button></div>
+        </div>
+      </section>
+
+      <section data-panel="lab" hidden>
+        <h1>Lab</h1>
+        <p class="lede">Flip the host contract by hand. Inside the Swift host these are set by the OS; in a plain browser you drive them here.</p>
+        <div class="card">
+          <div class="setting"><span>Appearance</span><span class="seg" data-lab="dark"><button data-v="light">Light</button><button data-v="dark">Dark</button></span></div>
+          <div class="setting"><span>OS generation<small>Sets macos="…" on &lt;html&gt;</small></span><span class="seg" data-lab="macos"><button data-v="">none</button><button data-v="26">26</button><button data-v="27">27</button></span></div>
+          <div class="setting"><span>Material<small>Sets glass="…" on &lt;html&gt;</small></span><span class="seg" data-lab="glass"><button data-v="native">native</button><button data-v="blur">blur</button><button data-v="solid">solid</button></span></div>
+          <div class="setting"><span>Zoom<small>Sets --zoom</small></span><span class="seg" data-lab="zoom"><button data-v="0.9">90%</button><button data-v="1">100%</button><button data-v="1.15">115%</button></span></div>
+        </div>
+        <div class="card" style="padding:12px 16px"><div class="mono" id="report" data-selectable></div></div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

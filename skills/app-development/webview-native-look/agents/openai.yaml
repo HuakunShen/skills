@@ -1,0 +1,4 @@
+interface:
+  display_name: "WebView Native Look"
+  short_description: "Make a WKWebView UI look native on macOS"
+  default_prompt: "Use $webview-native-look to give this WebView UI native macOS materials, appearance, accent, zoom and a host bridge, and verify it with the demo host."

@@ -118,3 +118,9 @@ If it happens anyway, resume with `-s <id>` and tell the run to write now.
 The S8 revision run lost its time trying to make `git apply` patches with correct `@@` hunk headers inside the doc, then stopped mid-replay. While debugging it also edited a product file in the docs-only worktree.
 
 Plan prompts must ask for complete files, or for exact anchor replacements ("this block occurs once; replace it with this block"), never unified diffs. Docs-only lanes must name product files as forbidden, and root checks `git status` after every plan run.
+
+## codex as a writer (2026-10-12)
+
+`codex exec -s workspace-write` cannot write git metadata in a linked worktree: it fails on `index.lock` and `ORIG_HEAD.lock`, even when `writable_roots` includes the repo, so it cannot commit, merge or create replay worktrees. Codex then reports itself blocked; it does not improvise.
+
+For writer tasks that need git, use `-s danger-full-access`, the same trust level as `opencode --auto`, with the usual write-set rules in the prompt. Keep `-s read-only` for reviews.

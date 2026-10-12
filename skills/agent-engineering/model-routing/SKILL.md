@@ -28,6 +28,18 @@ The owner's standing rule is to save quota. Do not reach for the strongest model
 | Claude Opus 5.5 (`opus`) | Claude Code / Agent SDK only | high quota | reserve; see §3 |
 | opencode `opencode/muse-spark-1.3-contributor-free` ("Muse Spark 1.3 Free") | opencode CLI (any harness with a shell) | free | owner rates it about Sonnet/high for execution; reads images accurately (verified 2026-10-12 on a settings screenshot) |
 | gpt-6.1-sol, reasoning effort high | codex CLI (`codex exec`), any harness with a shell | OpenAI quota | independent reviewer; read-only |
+| gpt-6.1-sol, efforts low…xhigh | codex CLI, `-s workspace-write` for writes | OpenAI quota | trial as implementer/plan writer from 2026-10-12 (medium first) |
+| gpt-6-luna, efforts low…max | codex CLI | OpenAI quota | trial as implementer/plan writer from 2026-10-12 (xhigh first) |
+| opencode `space-bunny-free` (`#max`) | opencode | free | anonymous, suspected MiniMax M3.1; 1M ctx, images; owner uses it as a benchmark model |
+| opencode `ling-3.1-flash-free` | opencode | free | no variants; AA index ≈ GLM-5.3 Flash; TS/Rust daily coding |
+| opencode `mimo-v2.6-flash-free` | opencode | free | no variants; ≈ DeepSeek V4.1 Flash; coding |
+| opencode `longcat-2.5-preview-free` | opencode | free | no variants; long multi-tool agent runs |
+| opencode `step-5-preview-free` (`#high`) | opencode | free | StepFun, mostly self-reported coding scores |
+| opencode `nemotron-3-ultra-free` | opencode | free | no variants; benchmarks disagree; light tasks only until tested |
+
+Not used: `nemotron-3.5-lightning-free` (AA index 13, too weak), `exo-free` (deprecated), `ling-3.0-flash-fin-free` (finance-tuned).
+Variants: pass `-m provider/model#variant`; probe with a bogus variant to see "Variant unavailable". Use the highest variant for free models: muse-spark `#xhigh` (no max), space-bunny `#max`, step-5 `#high`.
+Data: Zen's free endpoints may use prompts and outputs for training during the free period. Only send code that is or will be open source (Kunkun is). Never send secrets.
 
 If the current harness has no Claude models (Codex, opencode, Cursor, another CLI), the Claude rows do not exist. Map the tiers like this:
 - **Cheap/mechanical:** opencode free model.

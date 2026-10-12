@@ -128,3 +128,7 @@ For writer tasks that need git, use `-s danger-full-access`, the same trust leve
 ## gpt-6.1-sol capacity (2026-10-12)
 
 With two sol/xhigh writer runs active, a third sol review died after 111k tokens with "Selected model is at capacity". Keep at most 2 concurrent sol runs. Use gpt-6-luna as the overflow reviewer, and retry sol later for gate reviews.
+
+## Free endpoints drop long runs (2026-10-12)
+
+Long opencode runs on longcat, step-5 and space-bunny, and on mimo once, ended with "ECONNRESET: Connection lost" or "Upstream request failed: Endpoint is unavailable" (ling, twice in a row), and exited 1. Resume with `-s <session id>` and tell the run to continue; otherwise start a fresh run. Find the id with `opencode session list | grep <title>`.

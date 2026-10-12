@@ -47,6 +47,19 @@ If the current harness has no Claude models (Codex, opencode, Cursor, another CL
 - **Judgment fixes and plan writing:** the harness's mid-tier model, or opencode with a stricter prompt and an independent review.
 - **Review:** codex gpt-6.1-sol, read-only.
 
+### Reviewer benchmark (2026-10-12, S8 plan round 2, reference = sol/high's 11 findings: 4 P1 + 7 P2)
+
+| Reviewer | Overlap with sol | Own findings | Notes |
+|---|---|---|---|
+| gpt-6.1-sol/high | reference | 4 P1 + 7 P2 | gate reviewer |
+| gpt-6-luna/xhigh | (not on S8) | — | on SH1 and V7 it found real P1s that sol's own replay missed; good overflow reviewer |
+| muse-spark `#xhigh` | ~7/11 | 6 P1 + 7 P2 | best free reviewer; slight over-severity; usable as a second gate opinion |
+| step-5 `#high` | ~4/11 | 11 P2 | finds real doc/code mismatches (dead code, wrong line numbers) but rates everything P2 and missed the MCP/OAuth P1s |
+| longcat-2.5 | ~2/11 | 1 P1 + 4 P2 | some unique valid points; wrongly declared egress complete — do not use alone |
+| space-bunny, ling-3.1, mimo | no result | — | endpoint/rate-limit failures on long read-only reviews; retry later |
+
+Rule: for a plan review, use sol (gate) plus muse as the free second opinion. Free endpoints drop long runs often (ling: 3 "Endpoint unavailable" failures in one day), so do not depend on one free model for a gate.
+
 Add a row whenever a new model or tool is tried, and record it in the ledger.
 
 ### Tool preferences (how each tool wants to be driven)

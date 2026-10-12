@@ -1,0 +1,181 @@
+/*
+ * native.css — the reusable layer that makes a web UI read as a native macOS surface
+ * inside an embedded WKWebView. Copy this file (and the host attributes it expects) into
+ * any app; the rest of the demo is just content.
+ *
+ * Contract with the host (see host-macos/main.swift), all set on <html>:
+ *   macos="27"   OS major version          (absent in a plain browser)
+ *   dark         present when appearance is dark
+ *   backdrop="vibrancy|glass|none"  native material the host put behind the page
+ *   glass="native|blur|solid|system"  which material strategy to use (decided by app.js)
+ *   --color-system-accent      the user's macOS accent colour
+ *   --zoom                     UI scale factor, 1 = 100%
+ */
+
+/* ---------- 1. Base colours: a handful of inputs, everything else derived ---------- */
+:root {
+  --bg: #f5f5f7;
+  --bg-secondary: #ffffff;
+  --fg: #1d1d1f;
+  --selection: #1d1d1f;      /* alpha-derived below */
+  --accent-default: #0a84ff;
+  --accent: var(--color-system-accent, var(--accent-default));
+  --red: #ff453a; --green: #30d158; --orange: #ff9f0a;
+}
+:root[dark] {
+  --bg: #1c1c1e;
+  --bg-secondary: #2c2c2e;
+  --fg: #f5f5f7;
+  --selection: #ffffff;
+}
+/* Relative colour syntax: alpha steps are computed where they are used, so a theme only
+   supplies the base colours above. No JS, no recompilation when the theme changes. */
+:root {
+  --fg-5:  rgb(from var(--fg) r g b / 5%);
+  --fg-10: rgb(from var(--fg) r g b / 10%);
+  --fg-20: rgb(from var(--fg) r g b / 20%);
+  --fg-50: rgb(from var(--fg) r g b / 50%);
+  --fg-70: rgb(from var(--fg) r g b / 70%);
+  --bg-60: rgb(from var(--bg) r g b / 60%);
+  --bg-80: rgb(from var(--bg) r g b / 80%);
+  --selection-10: rgb(from var(--selection) r g b / 10%);
+  --accent-20: rgb(from var(--accent) r g b / 20%);
+}
+
+/* ---------- 2. Scale: one variable resizes every size token ---------- */
+:root {
+  --zoom: 1;
+  --spx: calc(1px * var(--zoom));
+  --font-11: round(calc(11 * var(--spx)), 1px);
+  --font-13: round(calc(13 * var(--spx)), 1px);
+  --font-15: round(calc(15 * var(--spx)), 1px);
+  --font-20: round(calc(20 * var(--spx)), 1px);
+  --space-4: round(calc(4 * var(--spx)), 1px);
+  --space-8: round(calc(8 * var(--spx)), 1px);
+  --space-12: round(calc(12 * var(--spx)), 1px);
+  --space-16: round(calc(16 * var(--spx)), 1px);
+  --space-24: round(calc(24 * var(--spx)), 1px);
+  --radius-6: round(calc(6 * var(--spx)), 1px);
+  --radius-10: round(calc(10 * var(--spx)), 1px);
+  --radius-14: round(calc(14 * var(--spx)), 1px);
+  --radius-window: round(calc(12 * var(--spx)), 1px);
+  --row-height: round(calc(38 * var(--spx)), 1px);
+  --hairline: 1px;
+}
+/* Hairlines: half a pixel on Retina. */
+@media (resolution >= 2x) { :root { --hairline: 0.5px; } }
+
+/* ---------- 3. OS generation as an attribute: one stylesheet, no JS branching ---------- */
+:root[macos="26"] { --radius-window: 26px; }
+:root[macos="27"] { --radius-window: 20px; }
+
+/* ---------- 4. Typography ---------- */
+:root {
+  font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  font-size: var(--font-13);
+  line-height: 1.35;
+  color: var(--fg);
+  font-synthesis: none;
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+:root[macos] { -webkit-font-smoothing: subpixel-antialiased; }
+
+/* ---------- 5. Make the WebView stop feeling like a web page ---------- */
+html, body {
+  margin: 0; height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: transparent;
+}
+body { user-select: none; -webkit-user-select: none; cursor: default; -webkit-touch-callout: none; }
+/* Opt back in only where the user is meant to select text. */
+[data-selectable], input, textarea { user-select: text; -webkit-user-select: text; cursor: text; }
+::-webkit-scrollbar { display: none; }
+button, input, select { appearance: none; -webkit-appearance: none; font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; }
+button { cursor: default; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* No transition on first paint, otherwise tokens animate from their defaults. */
+:root:not(.transitions-ready) * { transition: none !important; animation: none !important; }
+@media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; animation-duration: 0s !important; } }
+
+/* ---------- 6. Materials ----------
+ * Strategies, picked by the `glass` attribute on <html> (app.js decides):
+ *   native  the host paints a real system material (NSVisualEffectView / NSGlassEffectView)
+ *           BEHIND a transparent WKWebView; the page just leaves its backgrounds clear or
+ *           lightly veiled. This is the reliable way to get true vibrancy.
+ *   blur    backdrop-filter: works everywhere, blurs only what the page itself paints.
+ *   solid   opaque tint: browsers, Windows, "reduce transparency".
+ *   system  EXPERIMENTAL: the private -apple-visual-effect property. Not exposed to
+ *           third-party WKWebViews on macOS 27 (tested), so it is only used when
+ *           CSS.supports says it exists.
+ */
+.glass {
+  background: var(--bg-80);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+}
+:root[glass="native"] .glass { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[glass="native"] .palette.glass { background: rgb(from var(--bg-secondary) r g b / 72%); -webkit-backdrop-filter: blur(24px) saturate(150%); backdrop-filter: blur(24px) saturate(150%); }
+:root[glass="system"] .glass {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  -apple-visual-effect: -apple-system-glass-material;
+}
+:root[glass="system"] .glass.subdued { -apple-visual-effect: -apple-system-glass-material-subdued; }
+:root[glass="solid"] .glass { background: var(--bg-secondary); -webkit-backdrop-filter: none; backdrop-filter: none; }
+@media (prefers-reduced-transparency: reduce) {
+  .glass { background: var(--bg-secondary) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; -apple-visual-effect: none !important; }
+}
+
+/* ---------- 7. Window-shaped chrome ---------- */
+.window {
+  position: fixed; inset: 0;
+  display: grid; grid-template-columns: round(calc(220 * var(--spx)), 1px) 1fr;
+  border-radius: var(--radius-window);
+  overflow: hidden;
+}
+:root[dark] .window { box-shadow: inset 0 0 0 var(--hairline) var(--fg-10); }
+.sidebar { padding: round(calc(44 * var(--spx)), 1px) var(--space-8) var(--space-8); display: flex; flex-direction: column; gap: 2px; border-right: var(--hairline) solid var(--fg-10); }
+.content { position: relative; overflow: auto; padding: round(calc(44 * var(--spx)), 1px) var(--space-24) var(--space-24); background: var(--bg-60); }
+:root[glass="native"] .content { background: rgb(from var(--bg) r g b / 45%); }
+:root[glass="system"] .content { background: transparent; }
+
+.nav { display: flex; align-items: center; gap: var(--space-8); height: round(calc(30 * var(--spx)), 1px); padding: 0 var(--space-8); border-radius: var(--radius-6); font-size: var(--font-13); color: var(--fg); }
+.nav:hover { background: var(--fg-5); }
+.nav[aria-current="page"] { background: var(--selection-10); }
+.nav .dot { width: 18px; height: 18px; border-radius: 5px; background: var(--accent); }
+
+/* Launcher palette */
+.palette { width: min(100%, round(calc(680 * var(--spx)), 1px)); margin: 0 auto; border-radius: var(--radius-14); overflow: hidden; box-shadow: 0 0 0 var(--hairline) var(--fg-10), 0 18px 48px rgb(0 0 0 / 28%); }
+.search { display: flex; align-items: center; gap: var(--space-12); height: round(calc(56 * var(--spx)), 1px); padding: 0 var(--space-16); border-bottom: var(--hairline) solid var(--fg-10); }
+.search input { flex: 1; font-size: var(--font-20); caret-color: var(--accent); }
+.search input::placeholder { color: var(--fg-50); }
+.group-title { padding: var(--space-12) var(--space-16) var(--space-4); font-size: var(--font-11); font-weight: 600; color: var(--fg-50); }
+.row { display: flex; align-items: center; gap: var(--space-12); height: var(--row-height); margin: 0 var(--space-8); padding: 0 var(--space-8); border-radius: var(--radius-10); font-size: var(--font-15); }
+.row[aria-selected="true"] { background: var(--selection-10); }
+.row .icon { width: 24px; height: 24px; border-radius: 6px; background: var(--fg-20); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+.row .type { margin-left: auto; color: var(--fg-50); font-size: var(--font-13); }
+.footer { display: flex; justify-content: flex-end; gap: var(--space-12); padding: var(--space-8) var(--space-16) var(--space-12); font-size: var(--font-13); color: var(--fg-70); }
+kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; margin-left: 4px; padding: 0 4px; border-radius: 5px; box-shadow: inset 0 0 0 var(--hairline) var(--fg-20); font: inherit; font-size: var(--font-11); color: var(--fg-70); }
+
+/* Settings cards */
+h1 { margin: 0 0 var(--space-4); font-size: round(calc(22 * var(--spx)), 1px); font-weight: 600; }
+.lede { margin: 0 0 var(--space-16); color: var(--fg-70); }
+.card { border-radius: var(--radius-10); background: var(--bg-secondary); box-shadow: 0 0 0 var(--hairline) var(--fg-10); padding: 0 var(--space-16); margin-bottom: var(--space-16); }
+:root[glass="native"] .card, :root[glass="system"] .card { background: rgb(from var(--bg-secondary) r g b / 60%); }
+.setting { display: flex; align-items: center; justify-content: space-between; gap: var(--space-16); min-height: round(calc(44 * var(--spx)), 1px); }
+.setting + .setting { border-top: var(--hairline) solid var(--fg-10); }
+.setting small { display: block; color: var(--fg-50); font-size: var(--font-11); }
+.switch { position: relative; width: 38px; height: 22px; border-radius: 11px; background: var(--fg-20); transition: background 120ms ease-out; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 30%); transition: transform 120ms ease-out; }
+.switch[aria-checked="true"] { background: var(--accent); }
+.switch[aria-checked="true"]::after { transform: translateX(16px); }
+.btn { height: round(calc(26 * var(--spx)), 1px); padding: 0 var(--space-12); border-radius: var(--radius-6); background: var(--fg-10); }
+.btn:hover { background: var(--fg-20); }
+.seg { display: inline-flex; padding: 2px; border-radius: var(--radius-6); background: var(--fg-10); }
+.seg button { height: round(calc(22 * var(--spx)), 1px); padding: 0 var(--space-12); border-radius: 5px; }
+.seg button[aria-pressed="true"] { background: var(--bg-secondary); box-shadow: 0 1px 2px rgb(0 0 0 / 20%); }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--font-11); white-space: pre-wrap; }
+[hidden] { display: none !important; }

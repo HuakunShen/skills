@@ -90,44 +90,21 @@ Add a row whenever a new model or tool is tried, and record it in the ledger.
   - Use it for reviews only. It is read-only and reproduces bugs in memory.
   - Typical review: 10–25 minutes.
 
-## 2. Routing table (current rules)
+## 2. Routing table (lives in the rules store, not here)
 
-| Task kind | First choice | Fallback | Never |
-|---|---|---|---|
-| Run tests/regressions, collect logs, triage failures (rerun alone) | haiku | opencode | opus |
-| Status, Notion or table updates; rule-driven doc sweeps over a named file set | haiku or opencode | sonnet | opus |
-| Execute a reviewed plan whose code and tests are given verbatim, any task size | opencode | haiku (cheap tasks), sonnet; Codex sol/medium after repeated endpoint failure, then sol/high review for lifecycle | opus |
-| Implement review findings or convergence RED items: test first, judgment, small write set | opencode (good evidence 2026-10-11) | sonnet/high | — |
-| Fix races, lifecycle or concurrency findings with a deadlock risk | sonnet/high | opus/medium after sonnet fails twice | haiku |
-| Merge a finished branch with many conflicts | sonnet/high | — | haiku |
-| Root-cause a small bug from a symptom (stack, unhandled rejection) | opencode (Muse/xhigh first for Go traces; MiMo trial needs review) | sonnet/medium | — |
-| Write a spec plus a full-code hand-off plan | sonnet/high, with a sol review loop as the quality gate | opus only if sonnet fails the same review twice | opencode for security, lifecycle or native-integration plans |
-| New security or permission design | opus/medium, then sol review | — | haiku, opencode |
-| Independent milestone or plan review | codex gpt-6.1-sol/high | — | the model that wrote the code |
-| Visual/UI comparison from screenshots (read images, capture with Playwright, write proposal) | opencode | sonnet/medium | — |
-| Quick lookups, single grep, reading one file | do it yourself | — | any subagent |
-| Private multi-receipt runtime/provenance judgement | main agent; gpt-6.1-sol/medium if delegated | Luna for locating paths only | cheap verdict-only audit |
+The current tiers live in the shared rules store (§5 bootstrap finds it by name: Notion database or Sheets tab **Model Routing Rules**). Read rows with `Type=routing`, `Status=current` before every delegation; that table is the single source of truth, not this file.
+
+Update protocol (data goes to the store, this file stays unchanged):
+
+1. Insert a new `routing` row with the new First choice / Fallback / Never and the reason in Details.
+2. Mark the old row for that task kind `Status=superseded` (never edit or delete history).
+3. Insert a `change` row with today's date describing what changed and why.
 
 Effort defaults to medium; raise it only when correctness is hard.
 
 ## 3. Hard-won rules
 
-1. **Passing self-written tests is not evidence.** A plan or an implementation needs an independent review (sol) when it touches security, lifecycle, privacy or native integration.
-2. **Plans are where models differ most.**
-   - First-pass security or lifecycle plans fail sol review on every tier: opencode had 9–17 P1s, and opus also had 7–13.
-   - So write plans with sonnet/high and let the review loop converge. Opus does not save review rounds.
-3. **Execution is where cheap models shine.** With complete code in the plan, haiku and opencode produce byte-identical results with no rework.
-4. **Verify every delegated result as root before integrating it:**
-   - `git status` / `git diff --stat`, to confirm the write set;
-   - rerun the focused tests yourself;
-   - typecheck;
-   - read every test expectation that was changed, to confirm nothing was loosened.
-5. **A cheaper tier failing is data.** Log it, move that task kind up one tier, and note why.
-6. **Parallelise.** Idle slots are waste.
-   - opencode is free, so run several in separate worktrees.
-   - Keep at most 2 Claude subagents at a time.
-   - Run reviews (codex) concurrently with implementation of other lanes.
-   - Never run two full regressions at once in the same checkout, and never merge into a checkout while a regression runs there.
+Durable principles live in the rules store as rows with `Type=principle`, `Status=current` (same store as §2). Read them when they matter for the task; add a new one when experience earns it, supersede (never edit) when one stops being true. The standing ones at migration time: independent review for security/lifecycle/privacy/native work; plans differ most between tiers, execution differs least; verify every delegated result yourself (`git status`, rerun tests, typecheck, read changed expectations); a cheaper tier failing is data, move up; parallelise (free opencode runs in separate worktrees, at most 2 Claude subagents, never two regressions in one checkout).
 
 ## 4. Prompt rules per model (details in PROMPTS.md)
 
@@ -162,7 +139,7 @@ All machines share ONE ledger that lives outside this repo, so every machine rea
 Supported backends (pick one per user, then every machine uses it):
 
 - **Notion** (default): a database named exactly `Model Routing Ledger`.
-- **Google Sheets** (equivalent): a spreadsheet named exactly `Model Routing Ledger` whose first row is the column headers below.
+- **Google Sheets** (equivalent): a spreadsheet named exactly `Model Routing Ledger` whose first row is the column headers below. The rules store (§2) is a second tab named `Model Routing Rules`.
 
 Schema (same columns in both backends):
 
@@ -181,10 +158,10 @@ Schema (same columns in both backends):
 | Duration | text | K | wall-clock |
 | Tokens | text | L | subagent tokens when reported |
 
-First-run bootstrap (once per user, before the first record or review):
+First-run bootstrap (once per user, before the first record or review — sets up BOTH stores, `Model Routing Ledger` and `Model Routing Rules` with the routing/principle/change schema from §2):
 
-1. If a Notion connection exists, search it for a database named `Model Routing Ledger`. Found → use it (look it up by name every session; never hard-code its id, it differs per workspace).
-2. Connected but not found → create it with the schema above, then use it. Tell the user you created it.
+1. If a Notion connection exists, search it for databases named `Model Routing Ledger` and `Model Routing Rules`. Found → use them (look them up by name every session; never hard-code ids, they differ per workspace).
+2. Connected but a store is missing → create it with the schema above (ledger) or the §2 schema (rules: `Name` title; `Type`, `Date`, `First choice`, `Fallback`, `Never`, `Details`, `Status` text), then use it. Tell the user you created it.
 3. No Notion connection → ask the user to connect Notion, or to use Google Sheets instead (then create the spreadsheet with the header row above and use it). If their tools need a spreadsheet id, ask once and reuse it.
 4. Record each verified delegation as one row right away; do not batch.
 
@@ -192,63 +169,4 @@ Then, at least once per session in which you delegated:
 1. Read the ledger rows for each task kind (filter by Task kind, newest first).
 2. If a tier passed 3 or more times in a row with no rework, try the next cheaper tier on the next instance of that kind.
 3. If a tier failed or needed redo, move that kind up a tier.
-4. Update the routing table in §2 and add a dated line to the change log below, with the reason. Keep the table the single source of truth.
-
-## Change log
-
-- 2026-10-08: initial owner tiers (haiku simple, sonnet moderate, opus complex).
-- 2026-10-10: root over-tiered to opus. Frozen-contract work moves to sonnet; logs, setup and status work move to haiku.
-- 2026-10-10: opencode free adopted. First mechanical, then rated by the owner as about Sonnet/high for execution.
-- 2026-10-11: opencode plan writing for security and native surfaces failed sol review, so those plans moved to Claude. Then quota pressure, plus the fact that opus plans also failed their first review, moved plan writing to sonnet/high and execution to opencode first. Max 2 Claude subagents.
-- 2026-10-11 (evening): opencode passed judgment work, not only verbatim execution:
-  - PM12 RED-2/3/4: it designed the tests itself, stayed in scope, and correctly stopped on a gap outside its write set;
-  - a root-cause bug fix.
-
-  Review-finding fixes and small root-causing now go to opencode first. haiku proved reliable for full regressions with triage and for Notion sync. This skill was created as the global record.
-- 2026-10-12 (Xross): Muse Spark/xhigh produced five synthetic public-schema fixtures in ~1 minute with no rework; independent JSON/IP-range checks passed. Keep free models first for mechanical execution. Xross is currently private, so this trial sent no repository source; private lifecycle and contract integration remained in internal workers. One success is insufficient to demote those task kinds.
-- 2026-10-13 (Xross): OpenCode standalone tool cwd can differ from the CLI subprocess cwd. Supply an absolute task directory in the prompt and explicit workdir/paths for every tool; verify tool logs before declaring private-source isolation. Preserve nonzero CLI exit status even when a written research artifact independently verifies; do not label the whole run green from final prose.
-
-- 2026-10-13 (Xross locator verification): before claiming a predecessor or named file is absent, stat the explicit path and account for ignored reference directories. Before quoting chunk/buffer sizes, read the defining constant and distinguish hash chunks, transport blocks and stream item payloads. A bounded Luna audit needed both corrections; retain root verification, do not promote its inferred facts from prose alone.
-
-- 2026-10-13 (Xross SDK preparation): bounded internal Luna/medium export/install/typecheck tasks verified without source edits; keep private-source isolation and root reruns. Do not promote static consumer preparation to live RPC acceptance. Pass an explicit non-reserved shell result variable in delegation commands.
-
-- 2026-10-13 (Xross CU preparation): keep private locator work on internal Luna and security/native attribution on Sol; tree review rejected expiry renewal from receipt+mtime without bearer binding. Current routing tiers retained: disposable Create-bound proof and source-backed global IPC gate checks were required, so no demotion from this round.
-
-## Owner rule (2026-10-13, evening)
-Outsource first. Send work to free opencode models, or to gpt-6.1-sol as writer or reviewer. Use Claude subagents only after free models fail, for example after two failures on the same task. Up to 4 Claude subagents may run when necessary.
-
-- 2026-10-13 (Xross native preparation): a Sol6.1/medium copy/adaptation required three lifecycle P1 fixes and a runtime-only historical-size correction before Root headless PASS. Treat native cleanup/publication as judgment work even when copying an existing fixture. Keep Sonnet/high first where available; if private-source isolation and unavailable Claude require an internal Sol execution fallback, use high on the next native lifecycle adaptation, with an independent tree review and Root runtime. Do not substitute static PASS for runtime or GUI acceptance.
-
-- 2026-10-14 (Xross retained artifact lookup): treat fixture qualification as judgment, not a filename lookup. The cheap locator found matching Linux files but Root inferred they were Mac fixtures; real host execution failed ENOEXEC. Future native artifact qualification is done by the main integration agent with `file`, runtime target and original producer receipt, even after a cheap path lookup. Hash equality/source equality alone is insufficient. The §2 quick-lookup/main-agent rule remains authoritative; no private source may be sent to free endpoints.
-
-- 2026-10-14: Xross Luna route lookup conflated import preflight and a scoped nativeAcceptance=false with actual T2 PASS; Root corrected against terminal13/4 reports. Keep locating cheap, move private cross-record provenance judgement to main/Sol medium. Internal Sol6.1 builds and bounded test execution passed; private-source data restrictions remain unchanged.
-
-- 2026-10-12 (kknet): parallel free-model cohort used sanitized source snapshots: Muse review106s + exact source edit127s passed source-only Root checks; Step553s and MiMo401s supplied useful analysis but proposed unproven or contradicted conclusions. Prefer the stronger free Muse/xhigh for the next comparable Go trace, retain independent review, and do not infer a global ranking from one cohort. CLI v2.0.26 standalone Muse403 resolved by exact-session standard-CLI retry; no paid fallback. Original runtime qualification remains pending.
-
-- 2026-10-13 (kknet development): Muse authored a bounded Go observer after an exact-session recovery; Root fixed two parser details and ran real25/26 controls. A later reviewed implementation task hit two standard-CLI403s with zero edits; sol/medium fallback plus independent sol/high review kept development moving. Review found1P1/1P2 and Root corrected them before actual29 controls and originalS02PASS after a separate source-proven loopback fixture admission. Keep free first; endpoint failure is availability data, not a model ranking. Native times/tokens unmeasured. OpenCode v1 permission assumptions failed a harmless shell probe in one MiMo lane; enforce and verify current project permissions before future execution claims.
-
-- 2026-10-13 (kknet route-C): standard CLI Muse/xhigh evidence task and independent Ling crate-doc task both returned provider.auth403 without output (4.12s/2.47s). This is endpoint availability evidence, not comparative model quality. Keep free-first execution; after this shared availability failure continue finite sol/medium implementation plus sol/high private-lifecycle review, preserving actual tests and no served-model/timing inference.
-
-- 2026-10-13 (kknet owned engine): shared standard free-endpoint failures remain availability fallback evidence. Finite sol/medium authored SDK/admission/actor; sol/high caught a requested-stop terminal classification P2, fixed with RED/GREEN. Root actual same3MiB Service body4/negative2 proves continued execution after request expiry/drop, separate from source review. Luna/xhigh fixture and named-doc trials required oracle/cleanup/attribution rework; keep independent lifecycle gates and cheaper document first with exact source labels, not broad automatic tier escalation. Times/tokens unmeasured; keep free-first routing.
-
-- 2026-10-13 (kknet canonical IPC): sol/medium control/backend and daemon, Luna/xhigh bounded CLI completed finite writes under documented free-endpoint auth fallback. Independent sol/high caught wrapped-first-cause and foreign-operation-binding P2s, both corrected with actual RED/GREEN; Root full-check exposed omitted shared contract corpus (test-only correction). Keep free-first; keep identity/lifecycle review gates for both native implementers rather than treating a focused green as integration completeness. Durations/tokens unmeasured.
-
-- 2026-10-13 (kknet active-core daemon shutdown): finite sol/medium observer plus sol/high source review required a runtime-driven strategy correction: Docker logs corrupt binary receipts; live attach with strict terminal80, natural EOF and true child join then passed actual TLS/REALITY idle-core SIGTERM. A Root one-line listener retry error-class bridge retained limits and was separately reviewed. Keep free-first availability fallback and independent lifecycle review; source/mechanism green alone did not qualify observation strategy. Native model duration/tokens unmeasured.
-
-- 2026-10-13 (kknet restart and revision audit): finite sol/medium executor with sol/high lifecycle review completed same-daemon restart after Root tightened CLI refusal specificity. Root actual two profiles/eight bodies/two stale requests passed, separate from eight mechanism controls. Source audit caught cross-owner secret-ref restrictions and CLI summary/error visibility limits before revision implementation; keep exact source/observation labels and independent lifecycle gates. Free-first fallback availability is unchanged; native times/tokens unmeasured.
-
-- 2026-10-13 (kknet revision execution): sol/medium finite executor correctly reported an observable-CLI boundary before inventing CandidateSummary counts; Root narrowed attribution while preserving public DTO and real traffic gates. Independent sol/high review and Root nine controls plus twelve actual bodies on two profiles passed. Keep source-derived private expectations explicitly unobserved and original budgets; no need higher tier for this bounded correction. Native times/tokens unmeasured; free endpoint fallback unchanged.
-
-- 2026-10-13 (kknet canonical crash recovery): sol/medium author with sol/high source gate passed Root eight mechanisms and actual two-profile SIG9/recovery controls. Exact abnormal DTO retained and successful request joins are separate from source review. A finite product audit exposed live-probe state teardown and DIRECT/internal-network gaps; next work is concrete selected-node publication and explicit loopback egress, rather than multiplying equivalent harnesses. Keep free-first auth fallback and independent privacy/lifecycle gates; native times/tokens unmeasured.
-
-- 2026-10-13 (kknet selected-node product slice): Luna/xhigh implemented the frozen inspect/selected-claim CLI with six Root IPC controls and independent sol/high source PASS; sol/high authored a narrow original-budget review decoder with independent Luna review and Root eight controls. Keep cheaper bounded execution with independent identity/accounting review; do not infer comparative tier quality from helper vs CLI tasks. Final Control commit still has a confirmed request-deadline P2 under repair, so whole feature is not accepted. Corrected loopback plan closes a fixture-feature P2; static image tooling may run in parallel, actual image/runtime waits on immutable public-root inputs and source gates. Free auth fallback remains availability data; durations/tokens unmeasured.
-
-- 2026-10-13 (kknet final-node acceptance): finite sol/medium Control and Luna/xhigh CLI needed independent sol/high deadline/output-scope P2 repairs with meaningful RED/GREEN. Root current1.85 whole check667/707/16 and frozenlab1426P1manualBLOCKED0F52hashes pass their exact source gates. Keep independent original-request/lifecycle review for both native implementers; focused green did not catch lock-wait or unscoped output. Initial static image builder11 controls remain sourceFAIL2P2 pending unified repair; not an accepted image. Free-first auth availability fallback unchanged; timings/tokens unmeasured.
-
-- 2026-10-13 (kknet loopback prerequisites): bounded Luna/xhigh generator, image tooling and endpoint RPC continued actual product implementation under the existing free-auth availability fallback. Independent sol/high review caught builder worker-path/process-ownership and generator guard P2s; Root caught a missed discovery count during real outside-sandbox304 tests. Task1 sol/medium SDK passed its separate50-source gate. Keep independent source/lifecycle review for both implementers and record dependency/sandbox failures separately; no broad tier ranking from differing scopes. Strict SDK Task23 currently has a newly confirmed cached-readiness invalidation P2 under repair, not an accepted runtime. Durations/tokens unmeasured; free-first preference unchanged.
-
-- 2026-10-13 (kknet loopback assembly): retain free-first routing, with prior endpoint403/401 evidence and no auth retries. Native Sol author/reviewer capacity errors used bounded Luna/xhigh overflow: exact marker repair and finite template/settlement gates passed Root checks. Finite source gates did not catch actual Docker omitted nil fields or trailing template lines; require actual integration observations at these seams, not a model tier escalation based solely on untested source PASS. Harness generated documents now use an independent contracts parser after real invalid-enum failure. No duration/token ranking or three-clean-pass downgrade is supported by this batch.
-
-- 2026-10-13 (kknet actual loopback gate): Luna/xhigh CA recipe execution needed one ordering P2 repair; separate Luna artifact rejoin plus Root actual checks qualified four synthetic bodies/three credential/two marker refusals. Keep execution and artifact review separate, retain source-pass versus runtime-pass distinction, and require directory traversal plus nonroot reads in image audits. Sanitized CLI audit needed a Root timeline correction: newest verified accepted104 staging takes precedence over later-positioned historical v2 refusal paragraphs. No three-consecutive-clean same-kind outcomes justify down-tiering yet.
-
-- 2026-10-13 (kknet real subscription): bounded Luna/xhigh execution plus separate review delivered a first actual fresh104-node publication/production-loopback HTTP and verifiedHTTPS pass. Root fixed cross-module API assumptions and early owner registration; reviewer privacy/path findings were useful but a later completed-child P1 was contradicted by full source and actual no-network reproduction, explicitly withdrawn. Keep free-first under existing endpoint-auth fallback; use available sol/high for the next substantial lifecycle gate when capacity returns, and require full code spans plus reproduction for overflow-review allegations. No global tier ranking or clean-three-pass downgrade; native times/tokens unmeasured.
+4. Update the rules store per §2 and add a `change` row with the reason, instead of editing this file. The file stays stable; the stores evolve.

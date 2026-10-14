@@ -15,7 +15,7 @@ description: >-
 
 # Model routing
 
-Use the cheapest model that will get the task right on the first try, verify every result yourself, and log the outcome so these rules keep improving. The evidence behind each rule is in [LEDGER.md](LEDGER.md); prompt templates are in [PROMPTS.md](PROMPTS.md).
+Use the cheapest model that will get the task right on the first try, verify every result yourself, and log the outcome so these rules keep improving. The evidence behind each rule is the shared Notion database **Model Routing Ledger** (all machines use this one database via the Notion MCP connection, never a local file); prompt templates are in [PROMPTS.md](PROMPTS.md).
 
 The owner's standing rule is to save quota. Do not reach for the strongest model by default. Move a kind of task up a tier only after a cheaper tier failed at it, and down a tier after it keeps passing easily.
 
@@ -29,6 +29,7 @@ The owner's standing rule is to save quota. Do not reach for the strongest model
 | opencode `opencode/muse-spark-1.3-contributor-free` ("Muse Spark 1.3 Free") | opencode CLI (any harness with a shell) | free | owner rates it about Sonnet/high for execution; reads images accurately (verified 2026-10-12 on a settings screenshot) |
 | gpt-6.1-sol, reasoning effort high | codex CLI (`codex exec`), any harness with a shell | OpenAI quota | independent reviewer; read-only |
 | gpt-6.1-sol, efforts low…xhigh | codex CLI, `-s workspace-write` for writes | OpenAI quota | trial as implementer/plan writer from 2026-10-12 (medium first) |
+| gpt-6-astra, efforts up to xhigh | codex CLI | OpenAI quota, **very expensive** | strongest OpenAI model here. Owner rule 2026-10-13 (tightened same day): avoid entirely unless the owner asks; codex quota is limited |
 | gpt-6-luna, efforts low…max | codex CLI | OpenAI quota | trial as implementer/plan writer from 2026-10-12 (xhigh first) |
 | opencode `space-bunny-free` (`#max`) | opencode | free | anonymous, suspected MiniMax M3.1; 1M ctx, images; owner uses it as a benchmark model |
 | opencode `ling-3.1-flash-free` | opencode | free | no variants; AA index ≈ GLM-5.3 Flash; TS/Rust daily coding |
@@ -60,6 +61,10 @@ If the current harness has no Claude models (Codex, opencode, Cursor, another CL
 
 Rule: for a plan review, use sol (gate) plus muse as the free second opinion. Free endpoints drop long runs often (ling: 3 "Endpoint unavailable" failures in one day), so do not depend on one free model for a gate.
 
+Owner rule (2026-10-13): codex quota is limited. Use gpt-6.1-sol mainly for gate reviews; prefer opencode free models (muse) and Claude sonnet/opus for writing. Do not use gpt-6-astra.
+
+Owner rule (2026-10-12): hard design and architecture work goes to the strongest models only: gpt-6.1-sol (default), gpt-6-astra (only for exceptionally important design; too expensive otherwise), muse-spark #xhigh, opus high/xhigh, optionally space-bunny #max. Do not assign it to gpt-6-luna (weaker; extra data point at most).
+
 Add a row whenever a new model or tool is tried, and record it in the ledger.
 
 ### Tool preferences (how each tool wants to be driven)
@@ -78,7 +83,8 @@ Add a row whenever a new model or tool is tried, and record it in the ledger.
   - Several opencode runs can go in parallel in different worktrees.
   - It does not read CLAUDE.md or AGENTS.md, so the prompt must be self-contained.
   - Long commands must run in the foreground, or they die when `run` exits.
-  - If the owner's OpenCode desktop app holds port 49374, the CLI can fail. Never kill the owner's app; fall back to another tier.
+  - If the owner's OpenCode desktop app holds port 49374, do not infer that the CLI is unusable. The installed CLI documents `opencode run --standalone` (verified 2026-10-14), which creates a private server; use it for a fresh isolated task instead of `--server`/attaching to the owner's service. Never kill the owner's app. If an actual standalone attempt fails, fall back to another tier.
+  - For task-owned CLI scratch/logs, explicitly put `TMPDIR`, `TMP`, `TEMP` and `XDG_DATA_HOME`/`XDG_CACHE_HOME`/`XDG_STATE_HOME` on the external task directory when isolation is needed; preserve required session data only for the active task, and never clean shared owner app data. Public-only input rules still apply.
 - **codex**
   - Command: `codex exec -s read-only -m gpt-6.1-sol -c model_reasoning_effort=high -o out.md - < prompt.md`.
   - Use it for reviews only. It is read-only and reproduces bugs in memory.
@@ -100,6 +106,7 @@ Add a row whenever a new model or tool is tried, and record it in the ledger.
 | Independent milestone or plan review | codex gpt-6.1-sol/high | — | the model that wrote the code |
 | Visual/UI comparison from screenshots (read images, capture with Playwright, write proposal) | opencode | sonnet/medium | — |
 | Quick lookups, single grep, reading one file | do it yourself | — | any subagent |
+| Private multi-receipt runtime/provenance judgement | main agent; gpt-6.1-sol/medium if delegated | Luna for locating paths only | cheap verdict-only audit |
 
 Effort defaults to medium; raise it only when correctness is hard.
 
@@ -150,16 +157,17 @@ Effort defaults to medium; raise it only when correctness is hard.
 
 ## 5. Recording and self-evolution (do this every time)
 
-After each delegated task is verified, append one row to LEDGER.md:
+After each delegated task is verified, insert one row into the shared Notion database **Model Routing Ledger** (find it in Notion by that name; data source `collection://2fc4892a-c916-4e6f-ad92-c53f90ba050b`). Every machine records to and reads from this one database through the Notion MCP connection. Never use a local file as the ledger.
 
-`| date | project | tool | model/effort | task kind | size | outcome | rework | quality notes | duration | tokens |`
+Columns: `Name` (`{date} · {project} · {model} · {first ~50 chars of task kind}`), `Date`, `Project`, `Tool`, `Model`, `Task kind`, `Size`, `Outcome`, `Rework`, `Quality notes`, `Duration`, `Tokens`.
 
-- **outcome:** `pass`, `pass-after-retry`, `partial` or `fail`.
+- **outcome:** `pass`, `pass-after-retry`, `partial` or `fail`, with a parenthesised qualifier when needed (e.g. `pass (pending sol)`).
 - **rework:** what the next round or the review had to fix.
 - **quality:** review findings per kLOC if known, test discipline, whether it stayed in the write set, and honesty about gaps.
+- Insert with the `notion-create-pages` tool, `parent` = the data source above. Query with `notion-query-data-sources` (rows or sql mode).
 
 Then, at least once per session in which you delegated:
-1. Re-read the ledger rows for each task kind.
+1. Query the Notion ledger rows for each task kind.
 2. If a tier passed 3 or more times in a row with no rework, try the next cheaper tier on the next instance of that kind.
 3. If a tier failed or needed redo, move that kind up a tier.
 4. Update the routing table in §2 and add a dated line to the change log below, with the reason. Keep the table the single source of truth.
@@ -175,3 +183,20 @@ Then, at least once per session in which you delegated:
   - a root-cause bug fix.
 
   Review-finding fixes and small root-causing now go to opencode first. haiku proved reliable for full regressions with triage and for Notion sync. This skill was created as the global record.
+- 2026-10-12 (Xross): Muse Spark/xhigh produced five synthetic public-schema fixtures in ~1 minute with no rework; independent JSON/IP-range checks passed. Keep free models first for mechanical execution. Xross is currently private, so this trial sent no repository source; private lifecycle and contract integration remained in internal workers. One success is insufficient to demote those task kinds.
+- 2026-10-13 (Xross): OpenCode standalone tool cwd can differ from the CLI subprocess cwd. Supply an absolute task directory in the prompt and explicit workdir/paths for every tool; verify tool logs before declaring private-source isolation. Preserve nonzero CLI exit status even when a written research artifact independently verifies; do not label the whole run green from final prose.
+
+- 2026-10-13 (Xross locator verification): before claiming a predecessor or named file is absent, stat the explicit path and account for ignored reference directories. Before quoting chunk/buffer sizes, read the defining constant and distinguish hash chunks, transport blocks and stream item payloads. A bounded Luna audit needed both corrections; retain root verification, do not promote its inferred facts from prose alone.
+
+- 2026-10-13 (Xross SDK preparation): bounded internal Luna/medium export/install/typecheck tasks verified without source edits; keep private-source isolation and root reruns. Do not promote static consumer preparation to live RPC acceptance. Pass an explicit non-reserved shell result variable in delegation commands.
+
+- 2026-10-13 (Xross CU preparation): keep private locator work on internal Luna and security/native attribution on Sol; tree review rejected expiry renewal from receipt+mtime without bearer binding. Current routing tiers retained: disposable Create-bound proof and source-backed global IPC gate checks were required, so no demotion from this round.
+
+## Owner rule (2026-10-13, evening)
+Outsource first. Send work to free opencode models, or to gpt-6.1-sol as writer or reviewer. Use Claude subagents only after free models fail, for example after two failures on the same task. Up to 4 Claude subagents may run when necessary.
+
+- 2026-10-13 (Xross native preparation): a Sol6.1/medium copy/adaptation required three lifecycle P1 fixes and a runtime-only historical-size correction before Root headless PASS. Treat native cleanup/publication as judgment work even when copying an existing fixture. Keep Sonnet/high first where available; if private-source isolation and unavailable Claude require an internal Sol execution fallback, use high on the next native lifecycle adaptation, with an independent tree review and Root runtime. Do not substitute static PASS for runtime or GUI acceptance.
+
+- 2026-10-14 (Xross retained artifact lookup): treat fixture qualification as judgment, not a filename lookup. The cheap locator found matching Linux files but Root inferred they were Mac fixtures; real host execution failed ENOEXEC. Future native artifact qualification is done by the main integration agent with `file`, runtime target and original producer receipt, even after a cheap path lookup. Hash equality/source equality alone is insufficient. The §2 quick-lookup/main-agent rule remains authoritative; no private source may be sent to free endpoints.
+
+- 2026-10-14: Xross Luna route lookup conflated import preflight and a scoped nativeAcceptance=false with actual T2 PASS; Root corrected against terminal13/4 reports. Keep locating cheap, move private cross-record provenance judgement to main/Sol medium. Internal Sol6.1 builds and bounded test execution passed; private-source data restrictions remain unchanged.

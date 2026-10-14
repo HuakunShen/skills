@@ -1,10 +1,8 @@
-# Delegation ledger — moved to Notion
+# Delegation ledger — moved out of this repo
 
-The ledger now lives in the shared Notion database **Model Routing Ledger**
-(find it in Notion by that name; data source `collection://2fc4892a-c916-4e6f-ad92-c53f90ba050b`).
+The ledger lives in one shared store so all machines read and write the same rows.
+See SKILL.md §5 for backends, schema, and first-run setup.
 
-Do NOT append rows to this file. The skill (SKILL.md §5) records to Notion so all
-machines share one ledger.
-
-- All 300 rows up to 2026-10-14 were migrated on 2026-10-14. Git history of this
-  file preserves the old table.
+- Default: Notion database named **Model Routing Ledger** (look it up by name).
+- Equivalent alternative: a Google Sheets spreadsheet with the same name and columns.
+- Do NOT append rows to this file. Git history of this file preserves the old table.

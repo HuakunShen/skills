@@ -15,7 +15,7 @@ description: >-
 
 # Model routing
 
-Use the cheapest model that will get the task right on the first try, verify every result yourself, and log the outcome so these rules keep improving. The evidence behind each rule is the shared Notion database **Model Routing Ledger** (all machines use this one database via the Notion MCP connection, never a local file); prompt templates are in [PROMPTS.md](PROMPTS.md).
+Use the cheapest model that will get the task right on the first try, verify every result yourself, and log the outcome so these rules keep improving. The evidence behind each rule is a single shared ledger (a Notion database named **Model Routing Ledger** by default, or a user-chosen equivalent — see §5 for backends and setup); prompt templates are in [PROMPTS.md](PROMPTS.md).
 
 The owner's standing rule is to save quota. Do not reach for the strongest model by default. Move a kind of task up a tier only after a cheaper tier failed at it, and down a tier after it keeps passing easily.
 
@@ -157,17 +157,39 @@ Effort defaults to medium; raise it only when correctness is hard.
 
 ## 5. Recording and self-evolution (do this every time)
 
-After each delegated task is verified, insert one row into the shared Notion database **Model Routing Ledger** (find it in Notion by that name; data source `collection://2fc4892a-c916-4e6f-ad92-c53f90ba050b`). Every machine records to and reads from this one database through the Notion MCP connection. Never use a local file as the ledger.
+All machines share ONE ledger that lives outside this repo, so every machine reads and writes the same rows. Never create a second store, and never fall back to a local file without the user explicitly choosing it.
 
-Columns: `Name` (`{date} · {project} · {model} · {first ~50 chars of task kind}`), `Date`, `Project`, `Tool`, `Model`, `Task kind`, `Size`, `Outcome`, `Rework`, `Quality notes`, `Duration`, `Tokens`.
+Supported backends (pick one per user, then every machine uses it):
 
-- **outcome:** `pass`, `pass-after-retry`, `partial` or `fail`, with a parenthesised qualifier when needed (e.g. `pass (pending sol)`).
-- **rework:** what the next round or the review had to fix.
-- **quality:** review findings per kLOC if known, test discipline, whether it stayed in the write set, and honesty about gaps.
-- Insert with the `notion-create-pages` tool, `parent` = the data source above. Query with `notion-query-data-sources` (rows or sql mode).
+- **Notion** (default): a database named exactly `Model Routing Ledger`.
+- **Google Sheets** (equivalent): a spreadsheet named exactly `Model Routing Ledger` whose first row is the column headers below.
+
+Schema (same columns in both backends):
+
+| Column | Notion type | Sheets column | Content |
+|---|---|---|---|
+| Name | title | A | `{date} · {project} · {model} · {first ~50 chars of task kind}` |
+| Date | date | B | `YYYY-MM-DD` |
+| Project | text | C | short project key |
+| Tool | text | D | `claude`, `opencode`, `codex`, … |
+| Model | text | E | model/effort, e.g. `sonnet/high` |
+| Task kind | text | F | what was delegated |
+| Size | text | G | commits, files, lines — whatever measures the task |
+| Outcome | text | H | `pass`, `pass-after-retry`, `partial` or `fail`, with a parenthesised qualifier when needed (e.g. `pass (pending sol)`) |
+| Rework | text | I | what the next round or the review had to fix |
+| Quality notes | text | J | review findings per kLOC if known, test discipline, whether it stayed in the write set, honesty about gaps |
+| Duration | text | K | wall-clock |
+| Tokens | text | L | subagent tokens when reported |
+
+First-run bootstrap (once per user, before the first record or review):
+
+1. If a Notion connection exists, search it for a database named `Model Routing Ledger`. Found → use it (look it up by name every session; never hard-code its id, it differs per workspace).
+2. Connected but not found → create it with the schema above, then use it. Tell the user you created it.
+3. No Notion connection → ask the user to connect Notion, or to use Google Sheets instead (then create the spreadsheet with the header row above and use it). If their tools need a spreadsheet id, ask once and reuse it.
+4. Record each verified delegation as one row right away; do not batch.
 
 Then, at least once per session in which you delegated:
-1. Query the Notion ledger rows for each task kind.
+1. Read the ledger rows for each task kind (filter by Task kind, newest first).
 2. If a tier passed 3 or more times in a row with no rework, try the next cheaper tier on the next instance of that kind.
 3. If a tier failed or needed redo, move that kind up a tier.
 4. Update the routing table in §2 and add a dated line to the change log below, with the reason. Keep the table the single source of truth.

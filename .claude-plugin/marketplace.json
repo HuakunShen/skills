@@ -34,7 +34,8 @@
         "./skills/app-development/iroh-development",
         "./skills/app-development/coding-style",
         "./skills/app-development/native-desktop-styling",
-        "./skills/app-development/webview-native-look"
+        "./skills/app-development/webview-native-look",
+        "./skills/app-development/multi-surface-app"
       ]
     },
     {

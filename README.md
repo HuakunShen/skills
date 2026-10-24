@@ -53,6 +53,7 @@ Building applications, across mobile, terminal, web, and peer-to-peer.
 
 - `native-desktop-styling`: adapt shared desktop UIs to macOS, WinUI and GNOME/KDE with component-level styling, responsive geometry checks, and native host verification.
 - `webview-native-look`: make an embedded WKWebView UI feel native on macOS (real vibrancy / Liquid Glass behind a transparent web view, system accent, OS-generation attributes, zoom, host bridge), with a runnable AppKit demo and measured findings.
+- `multi-surface-app`: one core (any stack — Svelte/React, single-JS / dual JS+Rust / Rust+napi) shipping as npx CLI + browser web + TUI + Tauri desktop + VS Code extension + DSH plugin + Kunkun plugin; stack decision tree + contract-first monorepo + convert guide.
 
 ### Cloudflare — `skills/cloudflare`
 

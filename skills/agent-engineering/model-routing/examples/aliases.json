@@ -1,0 +1,11 @@
+{
+  "model": [
+    ["deepseek[- ]v4\\.1[- ]flash", "deepseek-v4.1-flash-free"],
+    ["muse[- ]spark", "muse-spark-1.3-free"],
+    ["gpt-6\\.1-sol/high", "gpt-6.1-sol/high"]
+  ],
+  "task_kind": [
+    ["^write plan", "plan writing"],
+    ["^independent .*review", "independent review"]
+  ]
+}

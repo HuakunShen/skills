@@ -76,6 +76,40 @@ Tested on macOS 27.0 (26A428), Swift 6.4, a stock third-party WKWebView:
 
 Evidence and probe commands: [references/findings.md](references/findings.md).
 
+## Windows & keyboard (multi-window launcher patterns)
+
+Measured against a shipping launcher (Raycast 2.7.3) and reproduced in a POC (2026-10-13;
+details in `references/findings.md`). The launcher genre needs more than one window and
+keyboard without focus theft:
+
+1. **Dropdowns, action menus and popovers are REAL child windows**, never DOM overlays: the
+   shell creates a borderless `NSPanel`, `addChildWindow(_:ordered:.above)` so it tracks the
+   parent, at `level = .popUpMenu` (the main launcher window lives there too). Bounds may
+   extend past the parent's — that is the point. Content is its own WKWebView loading its own
+   local page (screenshot tools and `CGWindowList` see them as separate windows, matching the
+   reference product).
+2. **Borderless panels never become key by default.** `NSPanel`/`NSWindow` with
+   `styleMask = [.borderless]` return `false` from `canBecomeKey`; `makeKeyAndOrderFront`
+   silently does nothing and the web view never receives keyboard events while mouse events
+   still arrive (they follow the window under the cursor). Override
+   `canBecomeKey/canBecomeMain -> true` on the panel subclass. This single fact explains
+   "clicks work but cannot type".
+3. **First click must land.** Override `acceptsFirstMouse(for:) -> true` on the web view
+   subclass, otherwise the first click only activates the window and is swallowed.
+4. **Keyboard without activating the app** (menu bar stays on the previous app) is a
+   reference-product speciality: they capture keys natively and forward them into the page
+   (`MainWindowInputCapture.swift` + first-responder sharing across windows). If you do not
+   need that, call `NSApp.activate(ignoringOtherApps: true)` on show and accept the menu-bar
+   switch. Child dropdowns: `override canBecomeKey -> false` so the parent keeps the keyboard.
+5. **Cache windows, do not destroy them.** Hide with `orderOut` (optionally fade `alphaValue`
+   in/out) and keep the panel + web view alive; the reference product parks hidden windows at
+   `alphaValue = 0` for prewarmed, instant reopening.
+6. **macOS 27 traps (measured):** `setValue(false, forKey: "occlusionDetectionEnabled")`
+   removes the window from compositing entirely (invisible, `onscreen=false` in CGWindowList) —
+   do not use. An invented KVC key such as `allowsTransparency` wedges the process inside
+   `WKWebView` init. `orderFrontRegardless()` shows without making key — pair it with
+   `makeKeyAndOrderFront`.
+
 ## Workflow for adopting this in an app
 
 1. Add the host contract to the existing shell (do not rewrite it): transparent web view, backdrop view,

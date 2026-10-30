@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "scope": "project",
+  "language": "en",
+  "inbox": {
+    "kind": "notion",
+    "uri": "https://www.notion.so/EXAMPLE_DB",
+    "notes": "Wish database; owner adds items from chat."
+  },
+  "research_store": {
+    "kind": "google_drive",
+    "uri": "https://drive.google.com/drive/folders/EXAMPLE",
+    "notes": "Reached locally through the references/ symlink."
+  },
+  "layout": {
+    "plans": "docs/specs"
+  },
+  "roles": {
+    "planner": "see model-routing",
+    "executor": "cheapest allowed worker that passes acceptance",
+    "reviewer": "independent model, fresh context"
+  },
+  "review": {
+    "design": {
+      "when": "new or risky design",
+      "tool": "codex",
+      "model": "<reviewer model>",
+      "effort": "high",
+      "prompt_file": "prompts/design-review.md"
+    },
+    "code": {
+      "when": "security, lifecycle, default-on, new auth surface",
+      "tool": "codex",
+      "model": "<reviewer model>"
+    },
+    "round_limit": 3,
+    "reviewer_may_edit": false
+  },
+  "reflect": {
+    "interval_minutes": 30,
+    "language": "zh"
+  },
+  "constraints": [
+    "Scratch only under /path/to/scratch",
+    "Push only when the owner asks",
+    "Never print secrets"
+  ],
+  "instruction_sources": [
+    {
+      "id": "owner-rules",
+      "kind": "notion",
+      "uri": "https://www.notion.so/EXAMPLE_RULES",
+      "applies_to": [
+        "design",
+        "design_review",
+        "code_review"
+      ],
+      "mode": "append",
+      "description": "Owner's review rules"
+    },
+    {
+      "id": "team-loop",
+      "kind": "s3",
+      "uri": "s3://bucket/dev-loop/loop-override.md",
+      "applies_to": [
+        "merge",
+        "deploy"
+      ],
+      "mode": "replace"
+    },
+    {
+      "id": "local-reflect",
+      "kind": "file",
+      "uri": "reflect.md",
+      "applies_to": [
+        "reflect"
+      ]
+    }
+  ],
+  "stage_tools": {
+    "design": {
+      "kind": "cli",
+      "name": "openspec",
+      "notes": "example only; use whatever the user prefers"
+    },
+    "design_review": {
+      "kind": "cli",
+      "name": "codex",
+      "notes": "read-only, high effort"
+    },
+    "implement": {
+      "kind": "skill",
+      "name": "test-driven-development"
+    }
+  }
+}

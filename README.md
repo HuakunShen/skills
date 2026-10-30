@@ -37,6 +37,7 @@ Build, extend, port, and test coding-agent plugins.
 
 - `injecting-agent-behavior`: add commands, skills, agents, rules, instructions, MCPs, and context injection.
 - `building-agent-orchestration`: design background agents, delegation, and team coordination.
+- `dev-loop`: orchestrator-run development process: intake log, dev loop, docs/ layout, parallel lanes, configurable review, 30-minute reflect, user-config patches.
 - `writing-opencode-plugins`: write and review OpenCode plugins and custom tools.
 - `porting-agent-plugins-across-harnesses`: split portable core and adapters for OpenCode, Claude Code, Codex, and similar tools.
 - `testing-agent-plugins`: test plugins, skills, commands, hooks, and orchestration systems.

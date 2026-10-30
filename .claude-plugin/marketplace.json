@@ -17,6 +17,7 @@
       "skills": [
         "./skills/agent-engineering/injecting-agent-behavior",
         "./skills/agent-engineering/building-agent-orchestration",
+        "./skills/agent-engineering/dev-loop",
         "./skills/agent-engineering/writing-opencode-plugins",
         "./skills/agent-engineering/porting-agent-plugins-across-harnesses",
         "./skills/agent-engineering/testing-agent-plugins"

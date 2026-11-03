@@ -61,3 +61,4 @@ Constraints are config (`constraints`) or an instruction source, so each project
 - Git bans for workers sharing a checkout: no stash, checkout, reset, restore, `add -A`, `add .`, submodule deinit. Stage exact paths. Preserve other people's dirty files. Re-read the log before amending.
 - Never print secrets; never use real services in tests; never steal focus or touch the owner's live data.
 - Agents report once.
+- Cargo.lock (and other generated lockfiles) is always inside every write set when a manifest changes; a worker must not stop over it.

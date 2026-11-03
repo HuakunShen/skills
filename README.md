@@ -50,7 +50,7 @@ Building applications, across mobile, terminal, web, and peer-to-peer.
 - `ratatui-dev`: good-looking Rust terminal UIs with ratatui and crossterm.
 - `shadcn-svelte-monorepo`: shadcn-svelte in a pnpm/SvelteKit monorepo with a shared UI package.
 - `iroh-development`: peer-to-peer apps with iroh (QUIC, NAT traversal, blobs, gossip, docs).
-- `coding-style`: Huakun's personal coding standards — modularity, type safety, library/app splits, monorepo structure, and the TS/Rust/Go language-choice matrix, distilled from his real repositories.
+- `coding-style`: personal coding standards — modularity, type safety, library/app splits, monorepo structure, and the TS/Rust/Go language-choice matrix, distilled from his real repositories.
 
 - `native-desktop-styling`: adapt shared desktop UIs to macOS, WinUI and GNOME/KDE with component-level styling, responsive geometry checks, and native host verification.
 - `webview-native-look`: make an embedded WKWebView UI feel native on macOS (real vibrancy / Liquid Glass behind a transparent web view, system accent, OS-generation attributes, zoom, host bridge), with a runnable AppKit demo and measured findings.
@@ -78,13 +78,11 @@ Capture and publish what a repo knows.
 Standalone developer utilities.
 
 - `strip-ai-coauthors`: remove AI/agent co-author trailers from git commit history safely.
-- `chatgpt-external-chrome`: drive a logged-in ChatGPT session in external Chrome and return the answer.
 - `ai-web-computer-use`: use Computer Use alone to operate logged-in ChatGPT, Gemini, and NotebookLM sessions, including generation and visible downloads.
-- `kunkun-browser-ai`: choose between ChatGPT Chat, Kunkun's durable Browser AI MCP, and Computer Use fallback; operate Kunkun's cross-provider browser workflows and artifact boundary.
-- `mac-storage-audit-and-dev-migration`: audit macOS disk usage and safely migrate Android/HarmonyOS developer data while protecting iCloud placeholders.
 - `external-mobile-sdks`: resolve this Mac's Android/HarmonyOS SDKs and emulators through the Portable2TB external-disk symlink layer.
 - `slidev-narrated-video`: turn a Slidev deck into an audio-synchronized MP4.
-- `youtube-podcast-tracker`: track YouTube/Bilibili channels and route new videos to summary podcasts or explicit audio playlists.
+
+Personal machine workflows, Kunkun integration, session-log analytics, and channel-to-podcast automation are maintained in the private [private-skills](https://github.com/HuakunShen/private-skills) repository.
 
 ## Layout
 

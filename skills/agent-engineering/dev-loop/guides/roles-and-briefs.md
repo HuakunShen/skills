@@ -14,6 +14,8 @@ Which model or tool fills each role is decided by the `model-routing` skill and 
 
 Workers can be the harness's own subagents, another agent CLI (codex, opencode, others), or a terminal multiplexer session. Prefer whichever the user's config names; a plain CLI run is usually simpler than a TUI.
 
+When workers must be listable and attachable (several run in the background), start them in named `hc` terminals and wait with `hc wait`; see [hc runtime](hc-runtime.md).
+
 ## Delegation rules
 
 - Workers that need parallelism get **disjoint write sets**. Same checkout is fine for unrelated files; use a worktree for complex or overlapping work.

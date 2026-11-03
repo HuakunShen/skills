@@ -5,7 +5,7 @@ Purpose: stop mid-flight requests from being lost and keep the parallel queue fu
 ## Steps
 
 1. Re-read the register, the decision/discussion log, the backlog index and the follow-ups file.
-2. List every running agent and lane; flag any with no activity for over an hour.
+2. List every running agent and lane; flag any with no activity for over an hour. If workers run under `hc`, use `hc ls` and `hc get` ([hc runtime](hc-runtime.md)).
 3. List every intake row that is not terminal (`captured`, or `lane:`/`patch-batch` with no live lane or batch). Compare against what the owner has said in chat: find requests with no row at all and add them. See [intake](intake.md).
 4. Find independent work that can start now and start it; keep the queue non-empty. Respect the user's concurrency limits.
 5. Merge finished lanes; update the register, logs and backlog; clean up worktrees and scratch.

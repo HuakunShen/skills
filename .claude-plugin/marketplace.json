@@ -70,13 +70,8 @@
       "skills": [
         "./skills/tooling/strip-ai-coauthors",
         "./skills/tooling/ai-web-computer-use",
-        "./skills/tooling/kunkun-browser-ai",
-        "./skills/tooling/mac-storage-audit-and-dev-migration",
         "./skills/tooling/external-mobile-sdks",
-        "./skills/tooling/chatgpt-external-chrome",
-        "./skills/tooling/slidev-narrated-video",
-        "./skills/tooling/youtube-podcast-tracker",
-        "./skills/tooling/agent-session-speed"
+        "./skills/tooling/slidev-narrated-video"
       ]
     }
   ]

@@ -41,6 +41,18 @@ hc wait lane-a --timeout 86400; hc get lane-a
 - `--children` needs the caller to be an hc terminal. A harness shell is not, and terminals it starts have `parent: null`. Wait on names there, or run the orchestrator itself under `hc run`.
 - A coding-agent TUI does not exit after a turn. `wait` ends on idle, done, blocked or error, not on process exit.
 
+## Shared terminals: count only your own
+
+`hc ls` lists every session on the machine (other projects, other orchestrators). Counting it unfiltered gives a wrong idle/busy picture, and killing by guess can stop someone else's worker.
+
+- Start every lane with `--label project=<project>` (plus `task=` and `lane=`). Count and list only `hc ls --label project=<project>`; keep a tiny script for it (xross: `scripts/my-lanes.sh`).
+- Never `hc kill`, `hc rm` or `hc interrupt` a terminal you did not start. Another session's busy lanes say nothing about your queue.
+- Never use `nohup`, `setsid` or a bare `&` for a worker, and never write an `until`/`sleep` wait loop: the harness cannot list them, so the user sees one task where there are five. A read-only one-shot such as `codex exec` may run as a normal harness background job because the harness lists it.
+
+## Keep the lanes full
+
+Idle capacity is a failure, not a resting state. At the end of every turn and whenever a wait returns, count your own live lanes; below the configured target (the xross owner's is 6) with a non-empty ready queue, start more before replying. "Blocked" is judged per task (owner decision, lab, device, host), never per project; a cargo lock only serialises the build step. Keep the ready queue as a file (rows blocked on nothing, no owner decision, no device) and pop from it. Reviews and verification run beside the lanes, not instead of starting new ones.
+
 ## See and manage
 
 ```sh

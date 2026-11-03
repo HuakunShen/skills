@@ -21,3 +21,8 @@
 | Passing tests prove nothing | Self-written tests only | Negative controls; independent review. |
 | Scratch evidence disappeared | Scratch volume wiped | Keep durable scripts and evidence in the private folder. |
 | Built bundle fails to launch after copy | Half-finished build copied | Verify the bundle before copying it anywhere. |
+| The orchestrator reports "waiting" with one lane live while a ready queue exists | Blocked was judged for the whole project, and `hc ls` was counted unfiltered | Count only your labelled lanes each turn, refill from a ready-queue file, judge blocked per task. |
+| A stale `mkdir` cargo lock stalled every lane for hours | A killed lane never released it | Before waiting on the lock, check whether any cargo/rustc process exists; if none, remove it. |
+| A lane stops on "outside the write set" for a file the change must touch | The plan listed too few files | Authorise the named file and resume the same session (`opencode run -c`); do not wait. |
+| A worker's mock host passes while the real host breaks | The test only drove a hand-made mock | Require one test through the real counterpart (e.g. the real framed host), and a negative control. |
+| Review of a lifecycle change finds a new P1 every round | Each fix adds a path nobody attacked | Budget 3-5 Sol rounds for lifecycle/security diffs; send each finding verbatim back to the author session; merge only on "no findings" plus a green re-run. |

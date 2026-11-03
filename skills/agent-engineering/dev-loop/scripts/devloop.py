@@ -6,12 +6,15 @@ Never contacts a service and never reads credentials. Remote instruction sources
 them with whatever tool it has.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
+import time
 
 STAGES = ["intent", "record", "design", "design_review", "slice", "implement",
           "verify", "code_review", "merge", "deploy", "close_out", "reflect"]
@@ -273,6 +276,73 @@ def scaffold(root, layout, templates, dry_run=False):
     return {"root": str(root), "dry_run": dry_run, "actions": actions}
 
 
+TERMINAL = ("done", "dropped", "merged-into")
+
+
+def open_intake(path):
+    """Intake rows (W-### tables) whose status is not terminal."""
+    rows = []
+    if not path.is_file():
+        return rows
+    for line in path.read_text(encoding="utf-8").splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) >= 6 and re.fullmatch(r"W-\d+", cells[0]) and cells[2]:
+            if not cells[5].lower().startswith(TERMINAL):
+                rows.append({"id": cells[0], "status": cells[5]})
+    return rows
+
+
+def git(root, *args):
+    done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    return done.stdout if done.returncode == 0 else ""
+
+
+def worktrees(root, now):
+    found, current = [], {}
+    for line in git(root, "worktree", "list", "--porcelain").splitlines() + [""]:
+        if line.startswith("worktree "):
+            current = {"path": line[len("worktree "):]}
+        elif line.startswith("branch "):
+            current["branch"] = line[len("branch refs/heads/"):]
+        elif not line and current:
+            path = current["path"]
+            stamp = git(path, "log", "-1", "--format=%ct").strip()
+            current["dirty"] = bool(git(path, "status", "--porcelain").strip())
+            current["idle_hours"] = round((now - int(stamp)) / 3600, 1) if stamp else None
+            found.append(current)
+            current = {}
+    return found
+
+
+def preflight(project, layout, state_path=None, stale_hours=1.0, now=None):
+    """Cheap board check for the reflect step. No model call; decides whether the orchestrator must wake."""
+    now = time.time() if now is None else now
+    root = expanded(project)
+    intake = open_intake(root / layout["intake"])
+    trees = worktrees(root, now)
+    register = root / layout["register"]
+    reasons = []
+    captured = [r["id"] for r in intake if r["status"].lower().startswith("captured")]
+    if captured:
+        reasons.append(f"untriaged intake rows: {', '.join(captured)}")
+    stale = [t["path"] for t in trees[1:] if t["idle_hours"] is not None and t["idle_hours"] >= stale_hours]
+    if stale:
+        reasons.append(f"lanes with no commit for {stale_hours}h+: {', '.join(stale)}")
+    snapshot = {"intake": intake, "worktrees": [{k: t.get(k) for k in ("path", "branch", "dirty")} for t in trees],
+                "register_mtime": register.stat().st_mtime if register.is_file() else None}
+    digest = hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
+    changed = True
+    if state_path:
+        state = expanded(state_path)
+        changed = not state.is_file() or state.read_text(encoding="utf-8").strip() != digest
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(digest + "\n", encoding="utf-8")
+    if changed:
+        reasons.append("board changed since last check")
+    return {"wake": bool(reasons), "reasons": reasons, "open_intake": len(intake),
+            "worktrees": trees, "digest": digest}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     cmds = parser.add_subparsers(dest="command", required=True)
@@ -291,6 +361,11 @@ def main():
     sc.add_argument("--project", default=os.getcwd())
     sc.add_argument("--config")
     sc.add_argument("--dry-run", action="store_true")
+    pf = cmds.add_parser("preflight", help="Cheap board check for reflect; prints wake=true only when the orchestrator is needed")
+    pf.add_argument("--project", default=os.getcwd())
+    pf.add_argument("--config")
+    pf.add_argument("--state", help="File holding the previous digest (outside the repo, e.g. the scratch root)")
+    pf.add_argument("--stale-hours", type=float, default=1.0)
     args = parser.parse_args()
     try:
         if args.command == "resolve":
@@ -302,6 +377,9 @@ def main():
             result = {"valid": True, "config": str(expanded(args.path))}
         elif args.command == "init":
             result = initialize(args.output, args.scope)
+        elif args.command == "preflight":
+            layout = resolve(args.project, args.config)["layout"]
+            result = preflight(args.project, layout, args.state, args.stale_hours)
         else:
             layout = resolve(args.project, args.config)["layout"]
             result = scaffold(args.project, layout, Path(__file__).resolve().parents[1] / "templates", args.dry_run)

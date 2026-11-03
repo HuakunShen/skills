@@ -123,6 +123,27 @@ class DevLoopTests(unittest.TestCase):
         self.assertNotIn("unrelated-thing", names)
         self.assertEqual(before, set(self.root.rglob("*")))
 
+    def test_preflight_wakes_only_on_change_or_problem(self):
+        import subprocess
+        project = self.root / "repo"
+        project.mkdir()
+        subprocess.run(["git", "init", "-q", str(project)], check=True)
+        subprocess.run(["git", "-C", str(project), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+        devloop.scaffold(project, devloop.DEFAULT_LAYOUT, ROOT / "templates")
+        intake = project / "docs/plans/INTAKE.md"
+        rows = intake.read_text().replace("| W-001 | | | bug / feature / chore / question | patch / lane | captured | |", "")
+        intake.write_text(rows + "| W-001 | 2026-10-31 | fix login | bug | patch | done | abc |\n| W-002 | 2026-10-31 | add search | feature | lane | lane:search | |\n")
+        state = self.root / "state/digest"
+        first = devloop.preflight(project, devloop.DEFAULT_LAYOUT, state)
+        self.assertTrue(first["wake"])
+        self.assertEqual(first["open_intake"], 1)
+        second = devloop.preflight(project, devloop.DEFAULT_LAYOUT, state)
+        self.assertFalse(second["wake"], second["reasons"])
+        intake.write_text(intake.read_text() + "| W-003 | 2026-10-31 | new bug | bug | patch | captured | |\n")
+        third = devloop.preflight(project, devloop.DEFAULT_LAYOUT, state)
+        self.assertTrue(third["wake"])
+        self.assertTrue(any("W-003" in r for r in third["reasons"]))
+
     def test_scaffold_dry_run_writes_nothing(self):
         project = self.root / "dry"
         project.mkdir()

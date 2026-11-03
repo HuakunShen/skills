@@ -4,6 +4,7 @@
 |---|---|---|
 | Requests vanish after a long run | Held only in chat | Write intent to the inbox/decision log first; run the reflect loop. |
 | Orchestrator dove into the newest bug and forgot the other lanes | New request treated as the new focus | Capture to the intake log first, delegate, board check before and after ([intake](intake.md)). |
+| Quota drains in a day with mostly subagents | Every worker inherits all tools and MCP servers, runs hundreds of calls, grows to 500k context, sleep-polls, and re-writes its cache after 5-minute idles | Measure, then apply [token budget](token-budget.md): lean worker agent, capped life with handoff, manifests, no polling. |
 | Only one background task running | Agents default to one task | Orchestrator starts all independent lanes; reflect step 4. |
 | Executor stops mid-plan, plan says X, tree says Y | Plan/reality drift | Executor stops and reports evidence; orchestrator records the deviation and widens the write set deliberately. |
 | File edited outside the approved write set | Write-set list built by hand and a path dropped | Build lists from the approval record, compare the count, record in the decision log. |

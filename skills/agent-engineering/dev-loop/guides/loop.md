@@ -15,14 +15,16 @@ Each stage lists what it takes in, what it does, and its exit gate. Skip a stage
 ## design
 - **Do:** (1) look first: this tree, any predecessor or reference project (read-only), upstream; name the paths. Copy at the largest unit that works. (2) plan file: goal, non-goals, mechanism, data/wire shape, failure modes, limits with numbers, lane breakdown with write sets and machines, test plan, where the design is weakest. (3) ADR when a boundary, wire format, trust decision or default changes. (4) Mechanisms not built yet are still designed; "not thought about" is not acceptable.
 - **Facts are your job, decisions are the owner's.** Read code and run experiments yourself; ask only about product behavior, public API, security or permission, licensing, destructive migration, data egress or cost. Batch questions with a recommended answer.
+- **Planning scope:** features sharing architecture, interfaces or dependencies use one common plan with per-feature goals, acceptance checks, write sets and ordering. Reference the shared design from lane briefs. New requests extend the relevant section; review changed decisions and their impact before dependent implementation. See [context reuse](token-budget.md#reuse-context-before-reading-again) for when to split a batch.
 - **Exit:** no unresolved owner-only decision; delegated decisions are noted for the decision log.
 
 ## design_review
-- **Do:** anything later work is written against (boundary, wire, security, phase plan) gets an independent review before it is built. See [review](review.md).
+- **Do:** anything later work is written against (boundary, wire, security, phase plan) gets an independent review before it is built. Review the shared design once across related features; later rounds cover revisions and affected assumptions. See [review](review.md).
 - **Exit:** latest verdict has no open P1; residual findings are in the follow-ups file.
 
 ## slice
 - **Do:** one lane = one branch + worktree + owner + write set. Decide which lanes are independent and start them together; related tasks may share a worktree. Write the brief ([roles and briefs](roles-and-briefs.md)). Choose executor tiers via `model-routing`.
+- Keep closely related small tasks with one worker when that avoids repeated discovery. Serialize overlapping writes; a shared plan does not make overlapping implementations independent.
 - **Exit:** every lane has a written brief and a disjoint or ordered write set; the register lists it.
 
 ## implement
@@ -34,6 +36,7 @@ Each stage lists what it takes in, what it does, and its exit gate. Skip a stage
 ## verify
 - Run the thing where it matters: real machines for hardware facts, real clicks for UI, real services only if the owner allowed it. Use a private state dir; never touch the owner's live data. State what was not verified.
 - A self-written test passing is not evidence for a plan or for security work.
+- After related lanes are integrated, check their interactions against the shared plan as well as each feature's acceptance checks.
 
 ## code_review
 - Review a coherent batch, not every patch. Risky and default-on changes get an independent reviewer; low-risk changes are verified and merged. See [review](review.md).

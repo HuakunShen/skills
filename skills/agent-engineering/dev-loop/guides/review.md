@@ -31,3 +31,25 @@ Everything is optional. Missing `tool` and `model` means: ask the user once, or 
 ## Plans
 
 A plan meant for a cheaper executor should be executable verbatim: facts tied to files read at a named commit, tests with expected failures, exact code or verified find/replace anchors, negative controls, exact write-set block, a verified/unverified section, and a review-rounds table mapping each finding to its change. Reviewers check executability (anchors exist, signatures match, write sets disjoint, controls prove the stated property).
+
+## Review related work together
+
+Choose review scope by shared interfaces, dependencies and integration behavior.
+One review may cover several features in a common plan or a coherent code batch;
+record which features, plan revision or commit range the verdict covers. Apply the
+[batch boundaries](token-budget.md#reuse-context-before-reading-again) so ready work
+can proceed without waiting for unrelated features.
+
+Start with a reviewer independent of the author, then resume that reviewer for
+related rounds while its context remains useful. Independence does not require a
+fresh reviewer for each feature or fix. Give follow-ups the previous verdict and
+findings, the delta since the reviewed version, changed constraints and new checks.
+Inspect the delta and affected callers, contracts and interactions; reopen shared
+design only where its assumptions changed. Close findings with current evidence.
+
+When replacing the reviewer, supply the common context manifest and review record
+instead of the whole author conversation. A summary locates evidence; the reviewer
+still reads enough current source to judge the claims independently. A prior PASS
+applies only to its recorded scope and version. Extend review when later changes
+affect those conclusions, and review the combined diff when integration introduces
+behavior that individual lane reviews did not cover.

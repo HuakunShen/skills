@@ -72,3 +72,20 @@ between snapshots. Store the delta/source with the ledger row, read it back, and
 roll up child sessions once if the task owns them. Snapshot times describe the
 measurement interval, not active generation time. The helper's model list covers
 the whole session; it cannot attribute a mixed-model delta to a single model.
+
+## Where did a day of Claude Code usage go?
+
+`scripts/claude_usage.py` reads Claude Code transcripts (`~/.claude/projects`)
+for one local day and splits usage by project, main session vs subagent, and
+model. It reports per-call context size, subagent start-up context, calls per
+subagent, full cache re-writes after idle gaps, Bash polling, and the costliest
+subagents. Costs are relative input-token equivalents from API price ratios;
+subscription quota weighting is not published, so compare shares.
+
+```sh
+python3 <skill>/scripts/claude_usage.py --day 2026-10-30 --strip-prefix=-Users-me-dev-
+```
+
+Daily totals per model across tools are quicker with `npx ccusage@latest daily`;
+use this script when you need the main/subagent split. Newer Claude Code writes
+the real numbers in `usage.iterations` with zeros at the top level; both are read.

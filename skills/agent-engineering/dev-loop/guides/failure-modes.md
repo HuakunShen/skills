@@ -11,6 +11,7 @@
 | Worker exits with a half-done long build | It moved the job to a background shell | Brief: run every command in the foreground and wait. |
 | Headless CLI worker sits at 0% CPU | Waits on stdin | Give it a closed stdin; confirm a session appears within minutes, else restart. |
 | Free-tier worker hits usage limits | Limits are per exit IP or per account | Stagger starts, limit simultaneous runs, rotate or fall back per the user's rule, resume the session rather than restart. |
+| Five workers run but none shows in the harness task list; the orchestrator polls with `until`/`sleep` | Workers were backgrounded inside a shell command, so the harness does not track them | Start each in a named `hc` terminal and wait with one background `hc wait <name> --timeout <large>` per worker ([hc runtime](hc-runtime.md)). `--timeout 0` does not mean forever. |
 | Wait loop never ends | Process-name pattern matches its own shell | Wait on a pid or output file. |
 | Cleanup script deleted files in the wrong place | `cd` failed, then `rm -rf` ran | `cd <main> \|\| exit 1` first in every chained cleanup. |
 | Main checkout broke after removing a worktree | Worktrees share submodule state | Re-initialise submodules and check build outputs after every removal; never deinit in main. |

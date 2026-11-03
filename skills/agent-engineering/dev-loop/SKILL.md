@@ -72,5 +72,6 @@ Continuing, finished, blocked on what, or a choice with a recommendation. The ow
 - [Review](guides/review.md): configurable design and code review, round limit, findings handling.
 - [Reflect](guides/reflect.md): the periodic self-review.
 - [Customization](guides/customization.md): config file, instruction sources, stage patches, setup conversation.
+- [hc runtime](guides/hc-runtime.md): visible, named background workers with herdr-core (`hc`), blocking waits, labels that link a worker to a task.
 - [Failure modes](guides/failure-modes.md): problems already seen and their fixes.
 - Templates in `templates/`, a full config in `examples/config.full.json`.

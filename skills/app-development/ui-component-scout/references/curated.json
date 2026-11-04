@@ -1,0 +1,829 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-04",
+  "purpose": "Text-only human-curated and official-docs example overlay for UI Component Scout; no images or screenshot references",
+  "review_scale": {
+    "user-visual": "HK independently navigated and selected the demo; agent did not necessarily visually review it this turn",
+    "browser-visual": "Agent saw live component/demo in cloud browser; static snapshots cannot prove motion performance",
+    "browser-interaction": "Agent activated a control and observed the new state",
+    "official-docs": "Official description read; NO live visual review asserted"
+  },
+  "motion_policy_vocabulary": [
+    "none",
+    "subtle",
+    "functional",
+    "demo-only",
+    "expressive",
+    "cinematic"
+  ],
+  "source_profiles": [
+    {
+      "library": "Animate UI",
+      "role": "animated-primitive",
+      "frameworks": [
+        "React",
+        "Vue"
+      ],
+      "focus": "Systematic motion for regular shadcn-style interactive primitives",
+      "llms": "https://animate-ui.com/llms.txt",
+      "context7_id": "/imskyleen/animate-ui",
+      "selection": "HK-sampled"
+    },
+    {
+      "library": "Cult UI",
+      "role": "signature-design",
+      "frameworks": [
+        "React"
+      ],
+      "focus": "Independent distinctive examples and unusual card shapes",
+      "llms": "https://www.cult-ui.com/llms.txt",
+      "context7_id": null,
+      "selection": "HK-sampled"
+    },
+    {
+      "library": "Kokonut UI",
+      "role": "signature-design",
+      "frameworks": [
+        "React"
+      ],
+      "focus": "Playful applied AI, media, background and data interfaces",
+      "llms": "https://kokonutui.com/llms.txt",
+      "context7_id": "/websites/kokonutui",
+      "selection": "HK-sampled"
+    },
+    {
+      "library": "Aceternity UI",
+      "role": "showpiece",
+      "frameworks": [
+        "React"
+      ],
+      "focus": "Unusual visually directed UI rather than ordinary form controls",
+      "llms": "https://ui.aceternity.com/llms.txt",
+      "context7_id": "/websites/ui_aceternity",
+      "selection": "HK-sampled"
+    },
+    {
+      "library": "React Bits",
+      "role": "showpiece",
+      "frameworks": [
+        "React"
+      ],
+      "focus": "Wow moments and cinematic interactive graphics",
+      "llms": "https://www.reactbits.dev/llms.txt",
+      "context7_id": "/davidhdev/react-bits",
+      "selection": "HK-sampled"
+    },
+    {
+      "library": "Fancy Components",
+      "role": "signature-design",
+      "frameworks": [
+        "React"
+      ],
+      "focus": "Experimental typography, physics, hover galleries and visual storytelling",
+      "llms": "https://www.fancycomponents.dev/llms.txt",
+      "context7_id": "/danielpetho/fancy",
+      "selection": "additional-research"
+    },
+    {
+      "library": "UI Layouts",
+      "role": "animated-primitive",
+      "frameworks": [
+        "React"
+      ],
+      "focus": "Production-oriented animated overlays, forms, code viewers and galleries",
+      "llms": "https://www.ui-layouts.com/llms.txt",
+      "context7_id": "/ui-layouts/uilayouts",
+      "selection": "additional-research"
+    },
+    {
+      "library": "Eased UI",
+      "role": "animated-primitive",
+      "frameworks": [
+        "React"
+      ],
+      "focus": "Tuned motion design in React 19/shadcn/Base UI, including AI and Mac UI",
+      "llms": "https://eased.dev/llms.txt",
+      "context7_id": "/easedui/ui",
+      "selection": "additional-research",
+      "licensing_note": "Free MIT source; 107 displayed as 70 Free and 37 Pro on 2026-11-04; check each page"
+    },
+    {
+      "library": "Kibo UI",
+      "role": "foundation",
+      "frameworks": [
+        "React"
+      ],
+      "focus": "Functional shadcn-compatible video, Kanban, Gantt, tree and rich editor",
+      "llms": null,
+      "context7_id": null,
+      "selection": "additional-research",
+      "licensing_note": "Per-component and repository licenses not audited"
+    },
+    {
+      "library": "Planes",
+      "role": "showpiece",
+      "frameworks": [
+        "React"
+      ],
+      "focus": "Highly designed functional/marketing components, especially AI and media",
+      "llms": "https://useplanes.com/llms.txt",
+      "context7_id": null,
+      "selection": "additional-research",
+      "licensing_note": "174 indexed: 10 Free, 164 Pro as of 2026-11-04; no license assumed"
+    }
+  ],
+  "curated": [
+    {
+      "library": "Animate UI",
+      "name": "Code Block",
+      "url": "https://animate-ui.com/docs/primitives/animate-ui/code-block",
+      "scenarios": [
+        "agent-code-demo",
+        "tutorial",
+        "code-generation-preview"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "demo-only",
+      "evidence": "user-visual",
+      "note_zh": "打字光标和逐步显示适合演示；真实静态源码应立即可见且可复制"
+    },
+    {
+      "library": "Animate UI",
+      "name": "Combobox",
+      "url": "https://animate-ui.com/docs/primitives/base-ui/combobox",
+      "scenarios": [
+        "command-palette",
+        "form-controls"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "subtle",
+      "evidence": "user-visual",
+      "note_zh": "选项展开柔和；高频筛选/方向键必须即时响应"
+    },
+    {
+      "library": "Animate UI",
+      "name": "Dropdown Menu",
+      "url": "https://animate-ui.com/docs/primitives/base-ui/dropdown-menu",
+      "scenarios": [
+        "navigation",
+        "dashboard-controls"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "subtle",
+      "evidence": "user-visual",
+      "note_zh": "打开和收起更连续；可根据快捷键频率关闭入场动画"
+    },
+    {
+      "library": "Cult UI",
+      "name": "Cutout Card",
+      "url": "https://www.cult-ui.com/docs/components/cutout-card",
+      "scenarios": [
+        "signature-cards",
+        "feature-showcase"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "none",
+      "evidence": "user-visual",
+      "note_zh": "挖角外形带来特殊品牌性格；不必附加强动画"
+    },
+    {
+      "library": "Cult UI",
+      "name": "Folded Card",
+      "url": "https://www.cult-ui.com/docs/components/folded-card",
+      "scenarios": [
+        "template-gallery",
+        "plugin-marketplace"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "none",
+      "evidence": "user-visual",
+      "note_zh": "折角卡片，适合模板和文件/插件展示"
+    },
+    {
+      "library": "Cult UI",
+      "name": "Organic Card",
+      "url": "https://www.cult-ui.com/docs/components/organic-card",
+      "scenarios": [
+        "marketing",
+        "editorial-feature"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "none",
+      "evidence": "user-visual",
+      "note_zh": "有机曲线和非典型卡片结构用于产品品牌区块"
+    },
+    {
+      "library": "Cult UI",
+      "name": "Gateway SVG Illustration",
+      "url": "https://www.cult-ui.com/docs/components/gateway-svg-illustration",
+      "scenarios": [
+        "hotkey-onboarding",
+        "integration-hub",
+        "request-flow"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "expressive",
+      "evidence": "user-visual",
+      "note_zh": "HK 认为适合快捷键隐喻；原版是汇入中心的网关/flow 插画，不提供键盘监听"
+    },
+    {
+      "library": "Cult UI",
+      "name": "Illustration Cursor",
+      "url": "https://www.cult-ui.com/docs/components/illustration-cursor",
+      "scenarios": [
+        "computer-use-demo",
+        "collaboration-demo"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "demo-only",
+      "evidence": "user-visual",
+      "note_zh": "可模拟 cursor 外观和协作标签；真正的 DOM 点击编排应比较 Eased Demo Cursor"
+    },
+    {
+      "library": "Cult UI",
+      "name": "Apple Keyboard",
+      "url": "https://www.cult-ui.com/docs/components/apple-keyboard",
+      "scenarios": [
+        "hotkey-onboarding",
+        "keyboard-visualization"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "functional",
+      "evidence": "user-visual",
+      "note_zh": "快捷键的可视化键盘，配合实际键盘状态点亮"
+    },
+    {
+      "library": "Cult UI",
+      "name": "Loading Carousel",
+      "url": "https://www.cult-ui.com/docs/components/loading-carousel",
+      "scenarios": [
+        "demo-gallery",
+        "onboarding",
+        "loading-tips"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "functional",
+      "evidence": "user-visual",
+      "note_zh": "图文轮播演示与加载提示；手动暂停和截图清晰可读"
+    },
+    {
+      "library": "Cult UI",
+      "name": "Circuit Board",
+      "url": "https://www.cult-ui.com/docs/components/circuit-board",
+      "scenarios": [
+        "device-fabric-illustration",
+        "landing-feature"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "expressive",
+      "evidence": "user-visual",
+      "note_zh": "Xross Device Fabric 驱动不同功能的发光电路插画；不等于真实路由图引擎"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "Ink Background",
+      "url": "https://kokonutui.com/docs/backgrounds/ink-background",
+      "scenarios": [
+        "landing-hero",
+        "interactive-headline"
+      ],
+      "design_role": "showpiece",
+      "motion_policy": "cinematic",
+      "evidence": "user-visual",
+      "note_zh": "鼠标经过时文字散开如烟墨，官网描述 WebGL，须有静态 fallback"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "Now Playing",
+      "url": "https://kokonutui.com/docs/cards/liquid-glass-card",
+      "scenarios": [
+        "audio-player",
+        "podcast",
+        "landing-feature"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "functional",
+      "evidence": "user-visual",
+      "note_zh": "ListenFlow 黑胶播放卡；需要连接真实 audio engine"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "Activity Terrain",
+      "url": "https://kokonutui.com/docs/cards/activity-terrain",
+      "scenarios": [
+        "activity-heatmap",
+        "usage-metrics",
+        "analytics"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "expressive",
+      "evidence": "user-visual",
+      "note_zh": "每日活动 count 的可旋转 3D 柱状网格；保留静态表格替代"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "Receipt Printer",
+      "url": "https://kokonutui.com/docs/cards/receipt-printer",
+      "scenarios": [
+        "billing-export",
+        "task-summary",
+        "completion-feedback"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "demo-only",
+      "evidence": "user-visual",
+      "note_zh": "逐行打印收据，适合一次性庆祝动效；导出内容应立即可读"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "Scroll Index",
+      "url": "https://kokonutui.com/docs/navigation/scroll-index",
+      "scenarios": [
+        "ai-chat-checkpoints",
+        "long-document-navigation"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "subtle",
+      "evidence": "user-visual",
+      "note_zh": "AI Chat turn/checkpoint 导航轨道，适配虚拟滚动和消息 anchor"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "Loader",
+      "url": "https://kokonutui.com/docs/inputs/loader",
+      "scenarios": [
+        "ai-thinking",
+        "upload-progress"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "functional",
+      "evidence": "user-visual",
+      "note_zh": "等待任务时漂亮的 loader；只在状态未完成时播放"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "AI Context Meter",
+      "url": "https://kokonutui.com/docs/ai/ai-context-meter",
+      "scenarios": [
+        "ai-chat",
+        "context-inspector"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "subtle",
+      "evidence": "user-visual",
+      "note_zh": "Kunkun 上下文窗口容量和来源构成；不得伪造 token 值"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "AI Inline Citations",
+      "url": "https://kokonutui.com/docs/ai/ai-citations",
+      "scenarios": [
+        "ai-chat",
+        "research-report",
+        "citations"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "subtle",
+      "evidence": "user-visual",
+      "note_zh": "正文与引用来源联动高亮，适合可溯源研究报告"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "AI Agent Lanes",
+      "url": "https://kokonutui.com/docs/ai/ai-agent-lanes",
+      "scenarios": [
+        "agent-monitor",
+        "parallel-agents",
+        "merge-trace"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "functional",
+      "evidence": "user-visual",
+      "note_zh": "KKTasks 并行 session/agent 的 lane、工具调用和合并视图；数据必须来自真实 trace"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "Clip Trimmer",
+      "url": "https://kokonutui.com/docs/media/clip-trimmer",
+      "scenarios": [
+        "video-editor",
+        "loom-recording"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "functional",
+      "evidence": "user-visual",
+      "note_zh": "胶片带和范围裁剪 UX；需要额外实现转码和导出"
+    },
+    {
+      "library": "Kokonut UI",
+      "name": "Synced Transcript",
+      "url": "https://kokonutui.com/docs/media/synced-transcript",
+      "scenarios": [
+        "podcast",
+        "live-transcript",
+        "media-scrubber"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "functional",
+      "evidence": "user-visual",
+      "note_zh": "词级转录高亮、点击定位音频；需要真实 timestamps"
+    },
+    {
+      "library": "React Bits",
+      "name": "Crystalized Ball",
+      "url": "https://reactbits.dev/animations/crystalized-ball",
+      "scenarios": [
+        "landing-hero",
+        "wow-demo"
+      ],
+      "design_role": "showpiece",
+      "motion_policy": "cinematic",
+      "evidence": "user-visual",
+      "note_zh": "强视觉 3D 球体，核心 Dashboard 默认不用"
+    },
+    {
+      "library": "React Bits",
+      "name": "Electric Border",
+      "url": "https://reactbits.dev/animations/electric-border",
+      "scenarios": [
+        "ai-thinking-highlight",
+        "landing-cta"
+      ],
+      "design_role": "showpiece",
+      "motion_policy": "expressive",
+      "evidence": "user-visual",
+      "note_zh": "只在 Agent 活跃状态或 CTA 使用；静止消息别全带电光"
+    },
+    {
+      "library": "React Bits",
+      "name": "Laser Flow",
+      "url": "https://reactbits.dev/animations/laser-flow",
+      "scenarios": [
+        "landing-feature",
+        "wow-demo"
+      ],
+      "design_role": "showpiece",
+      "motion_policy": "cinematic",
+      "evidence": "user-visual",
+      "note_zh": "激光落在内容上的剧场化效果，适合特性演示"
+    }
+  ],
+  "additional_research": [
+    {
+      "library": "Fancy Components",
+      "name": "Media Between Text",
+      "url": "https://www.fancycomponents.dev/docs/components/blocks/media-between-text",
+      "scenarios": [
+        "editorial-feature",
+        "marketing",
+        "media-showcase"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "expressive",
+      "evidence": "browser-visual",
+      "note_zh": "文字向两侧让出图片/视频，hover/ref/inView 触发"
+    },
+    {
+      "library": "Fancy Components",
+      "name": "Cursor Attractor & Gravity",
+      "url": "https://www.fancycomponents.dev/docs/components/physics/cursor-attractor-and-gravity",
+      "scenarios": [
+        "landing-hero",
+        "device-fabric-illustration"
+      ],
+      "design_role": "showpiece",
+      "motion_policy": "cinematic",
+      "evidence": "browser-visual",
+      "note_zh": "Matter.js 物体随鼠标产生引力/斥力；不能表达真实拓扑数据"
+    },
+    {
+      "library": "Fancy Components",
+      "name": "Pixel Trail",
+      "url": "https://www.fancycomponents.dev/docs/components/background/pixel-trail",
+      "scenarios": [
+        "landing-demo",
+        "interactive-background"
+      ],
+      "design_role": "showpiece",
+      "motion_policy": "expressive",
+      "evidence": "official-docs",
+      "note_zh": "鼠标像素轨迹，移动端默认关闭"
+    },
+    {
+      "library": "Fancy Components",
+      "name": "Image Trail",
+      "url": "https://www.fancycomponents.dev/docs/components/image/image-trail",
+      "scenarios": [
+        "gallery",
+        "portfolio",
+        "landing"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "expressive",
+      "evidence": "official-docs",
+      "note_zh": "移动光标释放浮动图片，适合素材图库宣传"
+    },
+    {
+      "library": "Fancy Components",
+      "name": "Text Cursor Proximity",
+      "url": "https://www.fancycomponents.dev/docs/components/text/text-cursor-proximity",
+      "scenarios": [
+        "marketing-typography"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "expressive",
+      "evidence": "official-docs",
+      "note_zh": "字体按鼠标距离变形，保留无动效可读文字"
+    },
+    {
+      "library": "UI Layouts",
+      "name": "Linear Modal",
+      "url": "https://www.ui-layouts.com/components/linear-modal",
+      "scenarios": [
+        "plugin-details",
+        "card-to-detail",
+        "desktop-app"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "subtle",
+      "evidence": "browser-interaction",
+      "note_zh": "卡片展开成大型详情覆盖层，打开效果和落位已操作"
+    },
+    {
+      "library": "UI Layouts",
+      "name": "Tree Code Viewer",
+      "url": "https://www.ui-layouts.com/components/tree-code-viewer",
+      "scenarios": [
+        "code-viewer",
+        "file-inspector"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "subtle",
+      "evidence": "official-docs",
+      "note_zh": "左侧文件树+右侧语法高亮，适配 Refyard/Kunkun"
+    },
+    {
+      "library": "UI Layouts",
+      "name": "Progressive Carousel",
+      "url": "https://www.ui-layouts.com/components/progressive-carousel",
+      "scenarios": [
+        "media-gallery",
+        "feature-demo"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "functional",
+      "evidence": "official-docs",
+      "note_zh": "不同媒体/特性逐步展示，允许手动控制"
+    },
+    {
+      "library": "UI Layouts",
+      "name": "Range Slider",
+      "url": "https://www.ui-layouts.com/components/range-slider",
+      "scenarios": [
+        "media-trimmer",
+        "numeric-control"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "subtle",
+      "evidence": "official-docs",
+      "note_zh": "shadcn Slider + 动画数值，不能影响输入精度"
+    },
+    {
+      "library": "UI Layouts",
+      "name": "Mac Genie",
+      "url": "https://www.ui-layouts.com/components/mac-genie",
+      "scenarios": [
+        "mac-desktop",
+        "dock-transition"
+      ],
+      "design_role": "showpiece",
+      "motion_policy": "expressive",
+      "evidence": "official-docs",
+      "note_zh": "类 macOS 过渡视觉参考，WKWebView 性能需验收"
+    },
+    {
+      "library": "Eased UI",
+      "name": "Demo Cursor",
+      "url": "https://eased.dev/components/demo-cursor",
+      "scenarios": [
+        "computer-use-demo",
+        "scripted-tutorial",
+        "recording"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "demo-only",
+      "evidence": "browser-visual",
+      "tier": "free",
+      "note_zh": "能按 ref/data-demo 移动、点击、拖拽真实 UI，优于纯协作图示但不是远控 driver"
+    },
+    {
+      "library": "Eased UI",
+      "name": "Click Ripple",
+      "url": "https://eased.dev/components/click-ripple",
+      "scenarios": [
+        "computer-use-demo",
+        "tutorial"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "demo-only",
+      "evidence": "official-docs",
+      "tier": "free",
+      "note_zh": "演示点击落点的短促视觉反馈"
+    },
+    {
+      "library": "Eased UI",
+      "name": "Kbd",
+      "url": "https://eased.dev/components/kbd",
+      "scenarios": [
+        "hotkey-onboarding",
+        "keyboard-visualization"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "functional",
+      "evidence": "official-docs",
+      "tier": "free",
+      "note_zh": "与真按键联动的轻微键帽下压"
+    },
+    {
+      "library": "Eased UI",
+      "name": "Thinking Bar",
+      "url": "https://eased.dev/components/thinking-bar",
+      "scenarios": [
+        "ai-chat",
+        "reasoning-state"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "functional",
+      "evidence": "official-docs",
+      "tier": "free",
+      "note_zh": "Thinking 状态、秒数和完成提示的自然过渡"
+    },
+    {
+      "library": "Eased UI",
+      "name": "Composer",
+      "url": "https://eased.dev/components/composer",
+      "scenarios": [
+        "ai-chat",
+        "prompt-composer"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "subtle",
+      "evidence": "official-docs",
+      "tier": "free",
+      "note_zh": "输入框高度伸缩，Send/Stop 按钮形态变化"
+    },
+    {
+      "library": "Eased UI",
+      "name": "Agent Orb",
+      "url": "https://eased.dev/components/agent-orb",
+      "scenarios": [
+        "voice-assistant",
+        "agent-state"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "expressive",
+      "evidence": "official-docs",
+      "tier": "free",
+      "note_zh": "Agent 语音/思考状态球，持续运动需限频"
+    },
+    {
+      "library": "Eased UI",
+      "name": "Group-by Morph List",
+      "url": "https://eased.dev/components/group-by-list",
+      "scenarios": [
+        "agent-monitor",
+        "tables",
+        "grouped-lists"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "functional",
+      "evidence": "official-docs",
+      "tier": "pro",
+      "note_zh": "切换分组时行移动到新位置，需对大列表测试性能"
+    },
+    {
+      "library": "Eased UI",
+      "name": "Agent Run Console",
+      "url": "https://eased.dev/components/agent-run-console",
+      "scenarios": [
+        "agent-monitor",
+        "session-dashboard"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "functional",
+      "evidence": "official-docs",
+      "tier": "pro",
+      "note_zh": "成熟的 Run/Step/Inspector 视觉结构，不含用户自己的 agent instrumentation"
+    },
+    {
+      "library": "Eased UI",
+      "name": "Live Activity Pill",
+      "url": "https://eased.dev/components/activity-pill",
+      "scenarios": [
+        "menu-bar",
+        "agent-monitor",
+        "background-task"
+      ],
+      "design_role": "animated-primitive",
+      "motion_policy": "functional",
+      "evidence": "official-docs",
+      "tier": "pro",
+      "note_zh": "running/needs-you/done 状态岛，适合 KKTasks、Kunkun"
+    },
+    {
+      "library": "Kibo UI",
+      "name": "Video Player",
+      "url": "https://www.kibo-ui.com/components/video-player",
+      "scenarios": [
+        "video-player",
+        "loom-playback",
+        "media"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "functional",
+      "evidence": "browser-interaction",
+      "note_zh": "基于 media-chrome，Play 按钮点击后变 Pause，已验证；需真实 media source"
+    },
+    {
+      "library": "Kibo UI",
+      "name": "Gantt",
+      "url": "https://www.kibo-ui.com/components/gantt",
+      "scenarios": [
+        "project-timeline",
+        "agent-monitor"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "functional",
+      "evidence": "official-docs",
+      "note_zh": "拖拽排程和时间区间可视化，适合后期 KKTasks"
+    },
+    {
+      "library": "Kibo UI",
+      "name": "Kanban",
+      "url": "https://www.kibo-ui.com/components/kanban",
+      "scenarios": [
+        "task-board",
+        "team-workflow"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "functional",
+      "evidence": "official-docs",
+      "note_zh": "文档描述 Space+方向键无障碍拖拽，首版 Observer 可能不需要"
+    },
+    {
+      "library": "Kibo UI",
+      "name": "Tree",
+      "url": "https://www.kibo-ui.com/components/tree",
+      "scenarios": [
+        "file-tree",
+        "nested-navigation"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "subtle",
+      "evidence": "official-docs",
+      "note_zh": "可组合树和键盘导航，适合 Refyard"
+    },
+    {
+      "library": "Kibo UI",
+      "name": "Editor",
+      "url": "https://www.kibo-ui.com/components/editor",
+      "scenarios": [
+        "markdown-editor",
+        "knowledge-work"
+      ],
+      "design_role": "foundation",
+      "motion_policy": "none",
+      "evidence": "official-docs",
+      "note_zh": "TipTap 富文本和 slash 命令；内容 sanitize 与存储仍需实现"
+    },
+    {
+      "library": "Planes",
+      "name": "Retro Music Player",
+      "url": "https://useplanes.com/components/retro-music-player",
+      "scenarios": [
+        "podcast-branding",
+        "music-player",
+        "landing"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "functional",
+      "evidence": "browser-visual",
+      "tier": "pro",
+      "note_zh": "复古掌机风播放器 shell，需用户接自己的 audio 元素"
+    },
+    {
+      "library": "Planes",
+      "name": "AI Chat",
+      "url": "https://useplanes.com/components/ai-chat",
+      "scenarios": [
+        "ai-chat",
+        "landing-demo"
+      ],
+      "design_role": "signature-design",
+      "motion_policy": "functional",
+      "evidence": "official-docs",
+      "tier": "verify-component",
+      "note_zh": "作为设计参考，整个库约 94% 是 Pro，不假设这个组件可免费安装"
+    }
+  ]
+}

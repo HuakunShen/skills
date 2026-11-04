@@ -1,0 +1,12 @@
+interface:
+  display_name: UI Component Scout
+  short_description: Find standout UI components by use case and framework
+  default_prompt: Use $ui-component-scout to find polished React/shadcn or Svelte/Vue/Solid
+    components for my project.
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

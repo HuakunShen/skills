@@ -7,7 +7,7 @@ description: Choose models and tools for delegated work, compare them on real ta
 
 Use the least expensive available model/tool combination that can meet the task's acceptance criteria. Optimize the total cost of an accepted result: usage, elapsed time, verification, and rework. A slower free model can be a good choice for unattended work; a costly retry can erase a cheap first attempt.
 
-This works with any orchestrator that can invoke workers: Claude Code, Codex, OpenCode, a cloud agent, another CLI, or an API workflow. The orchestrator owns acceptance. Do not assume that a model, effort level, subscription, or tool is available merely because an example names it.
+This works with any orchestrator that can invoke workers: Claude Code, Codex, OpenCode, Antigravity (agy), a cloud agent, another CLI, or an API workflow. The orchestrator owns acceptance. Do not assume that a model, effort level, subscription, or tool is available merely because an example names it.
 
 ## 1. Resume the user's state first
 

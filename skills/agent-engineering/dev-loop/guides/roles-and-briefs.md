@@ -12,11 +12,11 @@
 
 Which model or tool fills each role is decided by the `model-routing` skill and the user's `roles` config. Do not hard-code model names in this skill's output; read them from config.
 
-Workers can be the harness's own subagents, another agent CLI (codex, opencode, others), or a terminal multiplexer session. Prefer whichever the user's config names; a plain CLI run is usually simpler than a TUI. For Claude Code subagents, use a lean agent type with only the tools workers need (`templates/agents/lane-worker.md`) rather than general-purpose; see [token budget](token-budget.md).
+Workers can be the harness's own subagents, another agent CLI (codex, opencode, agy, others), or a terminal multiplexer session. Prefer whichever the user's config names; a plain CLI run is usually simpler than a TUI. For Claude Code subagents, use a lean agent type with only the tools workers need (`templates/agents/lane-worker.md`) rather than general-purpose; see [token budget](token-budget.md).
 
 When workers must be listable and attachable (several run in the background), start them in named `hc` terminals and wait with `hc wait`; see [hc runtime](hc-runtime.md).
 
-For Codex, follow the [Codex adapter](codex.md); use the TOML worker template only when the host can select custom roles. Otherwise pass its instructions in the brief.
+For Codex, follow the [Codex adapter](codex.md); use the TOML worker template only when the host can select custom roles. Otherwise pass its instructions in the brief. For Antigravity, follow the [Antigravity adapter](agy.md).
 
 ## Delegation rules
 

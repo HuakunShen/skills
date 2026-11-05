@@ -20,6 +20,7 @@ Use supported native APIs/exports first and record the installed version. Tool f
 
 - **Codex:** structured `codex exec --json` events can include `turn.completed` usage. Local rollout `token_count` events can expose cumulative `total_token_usage` and `last_token_usage`. Keep the last applicable cumulative receipt or exact turn deltas; summing every cumulative event double-counts. Cached input is generally a subset of input and reasoning output a subset of output in these receipts. Preserve raw field names and semantics.
 - **OpenCode:** inspect `opencode stats --help` and the session/API commands supported by the installed version. Aggregate stats help with broad workload analysis; they are not a receipt for one delegated task. Per-assistant records can expose model/provider/effort, time, tokens and cost. Some persisted formats report uncached input, cache read/write, visible output and reasoning as separate buckets. Do not apply Codex's inclusive accounting to a format with exclusive buckets.
+- **Antigravity (`agy`):** inspect session transcript files at `<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl`. Each `PLANNER_RESPONSE` step records verbatim `input_tokens`, `cache_read_tokens`, and `output_tokens` as discrete, exclusive counters. Cumulative session usage is the sum of step receipts; task delta is computed by snapshotting before and after delegated execution.
 - **Agents View / ccusage / Tokscale:** useful local usage readers when available. Verify date range, included clients, schema support, archived sessions, model aliases and missing/unpriced rows. Avoid summing their totals together: they may read the same underlying sessions. A session health/completion score is not the task's independently verified acceptance.
 - **Other harnesses:** retain the native usage receipt and its definition. When usage is unavailable, store unknown and the reason. Never estimate token counts from text length as if measured.
 
@@ -51,18 +52,22 @@ Show median/p90 and sample count only for like-for-like records. Different token
 
 Keep actual metered charge, subscription/quota consumption, and API-equivalent valuation separate. A local `$0` for a free endpoint is not proof of zero subscription cost, and an unpriced model must not be treated as free. Apply dated, matching provider/version/tier prices to exclusive billable categories once. Cache input uses its cache rate; reasoning included in output is not added twice. Note unknown extra charges.
 
+To query live subscription quotas and 5-hour/weekly rate-limit windows directly from provider CLIs (Antigravity `agy`, Codex App Server, Claude Code control requests), see [subscription-quota.md](subscription-quota.md) and use `scripts/quota.py`.
+
 An API-equivalent figure answers “what this measured usage would cost at this tariff.” It does not prove that the user would otherwise buy exactly that usage, nor that free routing caused a matching cash saving. A Standard-tier comparison of Contributor usage also changes data terms; label it as a separate counterfactual.
 
 ## Optional local receipt helper
 
 `scripts/usage.py` reads metadata only. It supports the observed Codex rollout
-cumulative counters and OpenCode `session_message` / `session_v2` schema; a
-different version may need another adapter. It opens SQLite read-only, does not
-invoke a model, and does not export prompts or write a remote table.
+cumulative counters, OpenCode `session_message` / `session_v2` schema, and
+Antigravity (`agy`) transcript JSONL logs; a different version may need another
+adapter. It opens SQLite and transcript files read-only, does not invoke a model,
+and does not export prompts or write a remote table.
 
 ```sh
 python3 <skill>/scripts/usage.py codex --path <task-rollout.jsonl> > before.json
 python3 <skill>/scripts/usage.py opencode --db <opencode.db> --session <exact-id> > before.json
+python3 <skill>/scripts/usage.py agy --transcript <transcript.jsonl> > before.json
 # Run the authorized task, then repeat the same selected command into after.json.
 python3 <skill>/scripts/usage.py diff before.json after.json > task-usage.json
 ```

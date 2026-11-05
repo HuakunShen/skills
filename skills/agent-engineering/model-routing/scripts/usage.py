@@ -37,6 +37,78 @@ def codex(path):
                 attribution='own session; cumulative snapshot; model attribution may be mixed')
 
 
+def agy(path):
+    transcript_path = Path(path).expanduser().resolve()
+    if not transcript_path.is_file():
+        raise ValueError(f'Transcript file not found: {transcript_path}')
+    session_id = None
+    try:
+        if transcript_path.parent.name == 'logs' and transcript_path.parent.parent.name == '.system_generated':
+            session_id = transcript_path.parent.parent.parent.name
+    except Exception:
+        pass
+
+    counters = dict(input_tokens=0, cache_read_tokens=0, output_tokens=0, total_tokens=0)
+    models = set()
+    rows = 0
+    receipt_at = None
+
+    with transcript_path.open('r', encoding='utf-8') as stream:
+        for line in stream:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(entry, dict):
+                continue
+
+            if not session_id and entry.get('session_id'):
+                session_id = entry.get('session_id')
+
+            if entry.get('model'):
+                models.add(str(entry['model']))
+            content = entry.get('content') or ''
+            if isinstance(content, str) and 'Model Selection` from' in content:
+                part = content.split('Model Selection` from', 1)[1]
+                if ' to ' in part:
+                    after_to = part.split(' to ', 1)[1]
+                    line_first = after_to.split('\n', 1)[0]
+                    target_model = line_first.split('. No need', 1)[0].rstrip('.').strip()
+                    if target_model:
+                        models.add(target_model)
+
+            if entry.get('source') == 'MODEL' and entry.get('type') == 'PLANNER_RESPONSE':
+                inp = entry.get('input_tokens') or 0
+                cache_read = entry.get('cache_read_tokens') or 0
+                out = entry.get('output_tokens') or 0
+                counters['input_tokens'] += inp
+                counters['cache_read_tokens'] += cache_read
+                counters['output_tokens'] += out
+                counters['total_tokens'] += (inp + cache_read + out)
+                if entry.get('created_at'):
+                    receipt_at = entry['created_at']
+                rows += 1
+
+    if not session_id:
+        session_id = transcript_path.stem
+    if not rows:
+        raise ValueError('No measured PLANNER_RESPONSE steps found in transcript')
+
+    return dict(
+        source='agy_transcript',
+        session_id=session_id,
+        models=sorted(models) if models else ['gemini'],
+        token_semantics='exclusive buckets: input_tokens, cache_read_tokens, output_tokens',
+        counters=counters,
+        last_receipt_at=receipt_at,
+        attribution='own session; step-level planner responses only; excludes subagent files',
+        measured_steps=rows,
+    )
+
+
 def opencode(db, session):
     db_path = Path(db).expanduser().resolve()
     connection = sqlite3.connect('file:' + quote(str(db_path), safe='/') + '?mode=ro', uri=True)
@@ -109,6 +181,7 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     c = sub.add_parser('codex'); c.add_argument('--path', required=True)
     o = sub.add_parser('opencode'); o.add_argument('--db', required=True); o.add_argument('--session', required=True)
+    a = sub.add_parser('agy'); a.add_argument('--path', '--transcript', dest='path', required=True)
     d = sub.add_parser('diff'); d.add_argument('before'); d.add_argument('after')
     args = parser.parse_args()
     try:
@@ -116,6 +189,8 @@ def main():
             result = codex(args.path)
         elif args.command == 'opencode':
             result = opencode(args.db, args.session)
+        elif args.command == 'agy':
+            result = agy(args.path)
         else:
             result = difference(args.before, args.after)
         if args.command != 'diff':

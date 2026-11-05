@@ -55,7 +55,9 @@ For Codex rollout files use `model-routing/scripts/usage.py codex --path <rollou
 to take before/after snapshots, then `usage.py diff before.json after.json`. Count
 parent and task-owned children once. Cached input is a subset of input and reasoning
 is a subset of output; do not add them twice. API valuation and subscription quota
-are different quantities. Claude startup tests and TTL savings are not Codex results.
+are different quantities. To query live account rate limits (primary 5h and secondary
+weekly windows via Codex App Server), run `model-routing/scripts/quota.py codex`. Claude
+startup tests and TTL savings are not Codex results.
 
 Compare the same task/base commit/acceptance checks with the same model and effort;
 include parent coordination, child calls, handoffs, retries, time and final quality.

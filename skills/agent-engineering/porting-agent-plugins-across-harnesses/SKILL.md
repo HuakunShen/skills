@@ -1,6 +1,6 @@
 ---
 name: porting-agent-plugins-across-harnesses
-description: Use when porting, designing, or reviewing plugins, skills, commands, tools, MCPs, or agent workflows across OpenCode, Claude Code, Codex, Gemini, Cursor, or multiple coding-agent harnesses
+description: Use when porting, designing, or reviewing plugins, skills, commands, tools, MCPs, or agent workflows across OpenCode, Claude Code, Codex, Antigravity (agy), Gemini, Cursor, or multiple coding-agent harnesses
 ---
 
 # Porting Agent Plugins Across Harnesses
@@ -13,7 +13,7 @@ Port behavior, not implementation details. Put deterministic logic in a portable
 
 - Official target harness docs are authoritative for each adapter.
 - OpenCode docs and local references are strongest for OpenCode.
-- Treat Claude Code, Codex, Gemini, Cursor capability entries as hypotheses until verified against current target docs or an installed harness.
+- Treat Claude Code, Codex, Antigravity, Gemini, Cursor capability entries as hypotheses until verified against current target docs or an installed harness.
 
 ## When Not To Use
 
@@ -48,13 +48,13 @@ Create a matrix before porting:
 
 This table is a starting template. Add one column for every target harness named in the task, and mark unknown capabilities as verify, omit, or unsupported rather than guessing.
 
-| Capability | OpenCode | Claude Code | Codex | Decision |
-| --- | --- | --- | --- | --- |
-| Commands | `.opencode/commands`, config `command` | verify current plugin/command support | verify current plugin/component support | Map or omit |
-| Skills | `SKILL.md` discovery and `skill` tool | verify current skills support | verify current component support | Map or omit |
-| Subagents | agents and task/subagent mechanisms | verify current task/subagent support | verify current session/agent support | Map or omit |
-| Hooks | OpenCode plugin hooks | verify current hook model | verify current event model | Adapter-specific |
-| MCP | config and observed skill-embedded patterns | verify current MCP config support | verify current MCP support | Adapter-specific |
+| Capability | OpenCode | Claude Code | Codex | Antigravity (agy) | Decision |
+| --- | --- | --- | --- | --- | --- |
+| Commands | `.opencode/commands`, config `command` | verify current plugin/command support | verify current plugin/component support | Slash commands (`/help`, `/plan`, etc.) | Map or omit |
+| Skills | `SKILL.md` discovery and `skill` tool | verify current skills support | verify current component support | `SKILL.md` in `.agents/skills`, `~/.gemini/config/skills`, builtin | Map or omit |
+| Subagents | agents and task/subagent mechanisms | verify current task/subagent support | verify current session/agent support | Native `invoke_subagent` / `define_subagent` | Map or omit |
+| Hooks | OpenCode plugin hooks | verify current hook model | verify current event model | Plugin lifecycle hooks & sidecars | Adapter-specific |
+| MCP | config and observed skill-embedded patterns | verify current MCP config support | verify current MCP support | `<appDataDir>/mcp/<serverName>` JSON schemas | Adapter-specific |
 
 For every row, choose one of: `native`, `adapter shim`, `MCP boundary`, `documented omission`, or `unsupported`.
 

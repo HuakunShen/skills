@@ -38,6 +38,8 @@ Facts checked on this machine:
 hc wait lane-a --timeout 86400; hc get lane-a
 ```
 
+- **Always give the background `hc wait` a Bash `description`**, e.g. `lane-a · <what it builds> (<model>)`. The harness task list shows the description, and shows the raw command (`hc wait lane-a --timeout 86400 | head -c 60`) when it is missing, so five lanes look identical and the owner cannot tell what is running. Name the lane, the task and the model. To rename an unnamed wait: stop that wait task (not the lane) and start it again with a description.
+
 - `--children` needs the caller to be an hc terminal. A harness shell is not, and terminals it starts have `parent: null`. Wait on names there, or run the orchestrator itself under `hc run`.
 - A coding-agent TUI does not exit after a turn. `wait` ends on idle, done, blocked or error, not on process exit.
 

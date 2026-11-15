@@ -13,6 +13,12 @@ An explicit missing/invalid path is an error, never permission to fall back. Wit
 
 The highest-priority configuration chooses storage as one unit. The helper returns policy layers from existing lower-priority configurations as well, so a project store does not hide the user's bans or budgets. Read them before dispatch; hard bans/data restrictions are cumulative unless the user explicitly changes them. Resolve contradictory explicit policies with the user. Policy-file paths are relative to their configuration file.
 
+Independently, the resolver discovers the nearest `.agents/model-routing/` directory at or above the project root and returns its `ledger.jsonl` and `rules.md` as `project_experience`. Both files must exist; an incomplete directory is an error, not an invitation to overwrite or fall back. Discovery is read-only and does not replace the selected configuration or its store. A legacy project config still selects its existing store as before. Avoid double-reading if it already points at the same files.
+
+For a new project-local store, explicitly create `.agents/model-routing/ledger.jsonl` (initially empty) and `rules.md` (initially an empty rules document). Keep shared global state separately, preferably in a private Git repository, and configure its absolute file paths in `${XDG_CONFIG_HOME:-~/.config}/model-routing/config.json`. Existing configured stores remain canonical until explicitly migrated. `storage.*.uri` values are returned as written; use absolute local paths because the resolver does not resolve them relative to the config.
+
+Load global and project rules together, prioritize applicable project evidence, and retain global hard restrictions. Write project attempts to the project ledger and general attempts to the selected global ledger; promote only supported, shareable conclusions to global rules. Do not automatically copy records, commit, push, or migrate. Check access before tracking project files: public repositories expose their contents and Git history. Use ignored files or a private store for sensitive information.
+
 Example (illustrative; do not use the example IDs):
 
 ```json
@@ -57,16 +63,18 @@ Keep two logical collections with the schemas in [data schema](data-schema.md). 
 
 | Backend | Locators and access |
 |---|---|
-| Google Sheets (default) | File `Model Routing`; ledger and rules tabs. Cache its stable URL/ID in state; validate title, tab names and headers before writing. |
+| Google Sheets | File `Model Routing`; ledger and rules tabs. Cache its stable URL/ID in state; validate title, tab names and headers before writing. |
 | Notion | Separate ledger/rules database or data-source URLs/IDs. Use bounded filtered queries. Respect service and connector quotas; honor retry-after on throttling and report a persistent access limit. |
 | Google Docs / other documents | Explicit document and two structured sections/tables. Keep stable record IDs; use supported revision/concurrency controls before replacing content. |
 | Google Drive | Drive is the container: specify the actual Sheet, Doc, CSV, JSONL, or other file plus its parser and write mechanism. |
-| Local files | Two CSV/JSONL files or two SQLite tables at explicit paths. Lock/serialize writes and replace atomically when rewriting a file. |
+| Local files | JSONL ledger and Markdown rules are recommended; legacy CSV/JSONL rules and SQLite remain valid. Use explicit paths. Lock/serialize writes and replace atomically when rewriting a file. |
 | Other store | Record a concrete locator and available adapter. Confirm the operations above work before relying on it. |
 
 For remote stores, remind the user to ensure **every intended AI tool** has the necessary read/write MCP, connector, or API access. One tool's connector is not automatically portable. Verify current official/community MCP availability at setup rather than baking a changing claim about a vendor into the skill.
 
 For local storage, remind the user about multi-device synchronization and concurrent-write conflicts. A single computer can keep the files locally or inside its project. Multiple computers need one synchronized location or an explicitly managed sync process.
+
+Git sync is explicit: fetch and reconcile before writing when multiple clones may have changed; serialize writes in each working tree and inspect conflicts before committing. Git is not a live lock. Preserve records from both sides, deduplicate by ID, and resolve conflicting current rules deliberately. Never commit conflict markers. Do not use the per-device ledger directory layout with automatic project discovery: it expects `ledger.jsonl`; combine separate files explicitly for reporting if used elsewhere.
 
 ## Migrating an existing store
 

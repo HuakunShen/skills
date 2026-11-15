@@ -37,6 +37,24 @@ class StateTests(unittest.TestCase):
         self.assertFalse(self.resolve()["configured"])
         self.assertEqual(before, set(self.root.rglob("*")))
 
+    def test_project_experience_is_discovered_alongside_global_store(self):
+        self.config(self.home / ".config/model-routing/config.json", "global")
+        folder = self.project.parent / ".agents/model-routing"
+        folder.mkdir(parents=True)
+        (folder / "ledger.jsonl").touch()
+        (folder / "rules.md").touch()
+        result = self.resolve()
+        self.assertEqual(result["storage"]["ledger"]["uri"], "global/ledger.jsonl")
+        self.assertEqual(result["project_experience"]["ledger"], str((folder / "ledger.jsonl").resolve()))
+        self.assertEqual(result["project_experience"]["rules"], str((folder / "rules.md").resolve()))
+
+    def test_incomplete_project_experience_is_an_error(self):
+        folder = self.project / ".agents/model-routing"
+        folder.mkdir(parents=True)
+        (folder / "ledger.jsonl").touch()
+        with self.assertRaises(state.StateError):
+            self.resolve()
+
     def test_project_storage_does_not_hide_user_ban(self):
         self.config(self.home / ".config/model-routing/config.json", "global", {"denied_models": ["expensive"]})
         project = self.config(self.project.parent / ".model-routing/config.json", "project")

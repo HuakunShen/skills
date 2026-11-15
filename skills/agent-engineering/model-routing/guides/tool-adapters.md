@@ -24,6 +24,6 @@ For shell wrappers, use an argv array or correct shell quoting. Check documented
 - **OpenCode:**
   - **CLI worker:** Dispatched via `opencode run` (support `-c` to resume session, non-interactive stdin `< /dev/null`). Custom agents in `.opencode/agents/` and commands in `.opencode/commands/`.
 - **Codex:**
-  - **CLI / Subagent:** Dispatched via `codex exec` (e.g. `codex exec -s read-only -m {model} -`) or `spawn_agent`. Supports custom agent definitions in `.codex/agents/*.toml`.
+  - **CLI / Subagent:** Dispatched via `codex exec` (e.g. `codex exec -s read-only -m {model} -`) or `spawn_agent`. Supports custom agent definitions in `.codex/agents/*.toml`. Resume a run with `codex exec resume <SESSION_ID> -` (id is in the log header, `session id: <uuid>`); see [session reuse](session-reuse.md).
 
 The user can prefer any orchestrator or worker mix. A CLI installed under one product does not grant permission, credentials, or subscription access in another.

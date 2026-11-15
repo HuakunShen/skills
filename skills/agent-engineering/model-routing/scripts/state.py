@@ -64,9 +64,20 @@ def candidates(project, explicit=None, env=None, home=None, skill_dir=None):
 
 
 def resolve(project, explicit=None, env=None, home=None, skill_dir=None):
+    root = expanded(project)
+    project_experience = None
+    for parent in (root, *root.parents):
+        folder = parent / ".agents" / "model-routing"
+        if folder.is_dir():
+            ledger, rules = folder / "ledger.jsonl", folder / "rules.md"
+            if not ledger.is_file() or not rules.is_file():
+                raise StateError(f"Incomplete project experience at {folder}: expected ledger.jsonl and rules.md")
+            project_experience = {"ledger": str(ledger), "rules": str(rules)}
+            break
     paths = candidates(project, explicit, env, home, skill_dir)
     if not paths:
-        return {"configured": False, "message": "No state found. Locate an existing store before bootstrapping one."}
+        return {"configured": False, "project_experience": project_experience,
+                "message": "No state found. Locate an existing store before bootstrapping one."}
     loaded = [(path, load(path)) for path in paths]
     layers = []
     for path, state in reversed(loaded):
@@ -82,6 +93,7 @@ def resolve(project, explicit=None, env=None, home=None, skill_dir=None):
         layers.append({"config": str(path), "policy": state.get("policy", {}), "policy_files": texts})
     path, state = loaded[0]
     return {"configured": True, "config": str(path), "scope": state.get("scope", "user"),
+            "project_experience": project_experience,
             "storage": state["storage"], "policy_layers": layers,
             "policy_precedence": "Newest explicit user instructions govern. Retain hard bans/data restrictions across layers unless the user changes them."}
 

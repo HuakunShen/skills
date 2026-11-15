@@ -8,13 +8,14 @@ Use the host's structured question UI when available, otherwise a compact conver
 
 Example prompts, adapted to what is already known:
 
-- **Where do you want to keep the two tables?** Recommend Google Sheets for shared cloud access; offer Notion, local files, or an existing document/store. Ask for an existing resource before creating a new one.
+- **Where should experience live?** Offer project-local JSONL/Markdown plus a global store, or an existing cloud store such as Sheets or Notion. Ask for an existing resource before creating a new one.
 - **Who should share the experience?** All AI tools/projects for this user, only this project, or another explicit scope. Ask whether the user works on one device or several if that changes the storage recommendation.
 
 Explain the relevant tradeoff alongside the choice:
 
 - For Sheets/Notion/another cloud store, every intended AI tool needs authorized read/write access through its own supported MCP, connector, or API. Verify current access instead of promising a vendor-wide MCP. One connected tool does not connect all the others.
 - For local files, one computer is straightforward; multiple devices need deliberate synchronization and serialized writes. An ignored skill-local file will not sync through Git.
+- A tracked project ledger may expose project names, task details and evidence to everyone with repository access. Check the repository's actual access and choose tracked, ignored, or private storage accordingly.
 - For configuration, prefer a shared user config across tools or a project config for project-specific learning. Offer the ignored skill-local file as a convenient alternative and explain reinstall/sync limits.
 
 Do not decide only from the default. If the user mainly uses a tool without access to the proposed cloud backend, explain that concrete limitation and offer a reachable option. Let the user choose; retain an existing backend when a connection is temporarily unavailable.

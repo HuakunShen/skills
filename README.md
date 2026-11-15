@@ -80,7 +80,12 @@ Standalone developer utilities.
 - `strip-ai-coauthors`: remove AI/agent co-author trailers from git commit history safely.
 - `ai-web-computer-use`: use Computer Use alone to operate logged-in ChatGPT, Gemini, and NotebookLM sessions, including generation and visible downloads.
 - `external-mobile-sdks`: resolve this Mac's Android/HarmonyOS SDKs and emulators through the Portable2TB external-disk symlink layer.
+### Video Production — `skills/video-production`
+
+Create narrated videos and animated explainers.
+
 - `slidev-narrated-video`: turn a Slidev deck into an audio-synchronized MP4.
+- `animated-concept-explainer`: create motion-graphic explainers with animated UI and visual metaphors.
 
 Personal machine workflows, Kunkun integration, session-log analytics, and channel-to-podcast automation are maintained in the private [private-skills](https://github.com/HuakunShen/private-skills) repository.
 

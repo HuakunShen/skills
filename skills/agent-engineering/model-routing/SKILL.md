@@ -9,13 +9,28 @@ Use the least expensive available model/tool combination that can meet the task'
 
 This works with any orchestrator that can invoke workers: Claude Code, Codex, OpenCode, Antigravity (agy), a cloud agent, another CLI, or an API workflow. The orchestrator owns acceptance. Do not assume that a model, effort level, subscription, or tool is available merely because an example names it.
 
+## Requested actions
+
+The user can invoke the skill and name an action in ordinary prompt text, for example `$model-routing setup` or `$model-routing summarize this project`. These are skill instructions, not native CLI subcommands or a separate argument parser. Natural-language requests work too. If an action is specified, run that focused workflow; otherwise use the routing workflow below. All actions honor the state, policy and temporary-rule checks in section 1.
+
+| Action | Behavior |
+|---|---|
+| `setup` | Discover existing state first, then use [interactive setup](guides/interactive-setup.md) for the requested scope or changes. Preserve existing stores and policies; do not reset, replace or migrate them unless requested. |
+| `status` | Report selected store, project experience, applicable policy constraints, and current or upcoming temporary overrides with their validity and scope. Report inaccessible or missing state. Do not expose secrets. |
+| `summarize` | Summarize verified ledger outcomes and applicable rules for the requested scope and period; default to the current project when project experience exists, otherwise the selected store. Use the reporting and evidence guidance in section 6, showing sample sizes and uncertainty. Present suggested rule changes without writing them unless requested. |
+| `override` | Create, change, or inspect a user-requested temporary preference using [temporary overrides](guides/data-schema.md#temporary-overrides). Resolve scope, model, time and any material ambiguity; preserve hard restrictions. |
+
+`status` and `summarize` do not create stores, delegate tasks, or change durable rules. Normal expired-override cleanup still applies when rules are read. Explicit user instructions control scope and requested writes; do not start unrelated workflows solely because an action word appears in another context.
+
 ## 1. Resume the user's state first
 
 At the start of every session, and after the user changes a preference:
 
 1. Resolve the persistent configuration. If shell access is available, run `python3 <skill-folder>/scripts/state.py resolve --project <project-root>`. Otherwise use the same lookup order in [state and storage](guides/state-and-storage.md).
-2. Read the selected storage location, all returned policy layers and referenced policy files, and the user's current routing/principle rules. Load user restrictions before choosing or trying models.
+2. Read the selected storage location, any returned project experience, all policy layers and referenced policy files, and the user's current routing/principle rules. Load user restrictions before choosing or trying models.
 3. Report the selected scope/backend briefly when setting it up or when it changes. Reuse it throughout the session.
+
+On reading rules, check temporary overrides against the current time, remove expired temporary sections from the applicable rules file, and read back the result before routing. Until removal succeeds, never apply an expired override. Follow [temporary overrides](guides/data-schema.md#temporary-overrides) for time zones, precedence and safe cleanup.
 
 Configuration contains locators and preferences, never API keys. A skill is reusable instructions; its state lives in files or a database the next agent can read. An ignored `.local/config.json` inside this skill is supported, but copies/installations do not share that file automatically. Prefer a common user configuration for multiple tools, or a project configuration for project-specific learning.
 
@@ -23,7 +38,7 @@ Newest explicit user instructions govern. Honor banned models, allowed tools, pr
 
 If there is no configuration, run a short interactive setup using [setup conversation](guides/interactive-setup.md). Ask about storage/scope, available tools and user constraints, then exploration preferences. Offer sensible defaults, accept free-text answers, and ask only for missing information. Persist the answers before the first delegation. Existing users resume their saved setup; they do not repeat the questionnaire each session.
 
-If the selected store cannot be accessed, explain the access problem and retain the selection. Do not silently create another ledger. Recommend Google Sheets to new users when accessible; Notion, documents, or local files are equally valid explicit choices.
+If the selected store cannot be accessed, explain the access problem and retain the selection. Do not silently create another ledger. Local files and cloud stores are equal options; recommend based on scope, privacy and access.
 
 ## 2. Describe the task before choosing
 
@@ -43,6 +58,10 @@ Discover the installed tool/provider's current model list or tool metadata. Sepa
 
 Read relevant current rules and comparable ledger records: same task kind/domain, similar risk/size, project context, model version, effort, and verification standard. Start with scoped queries rather than reading the whole history before every task.
 
+Apply hard policies across scopes. Prefer applicable project rules and observations, then use global experience as a provisional prior. Consult other projects only when access and sharing are authorized. If project and global empirical rules differ, the project rule applies within its scope; it cannot override hard policy.
+
+An active user-requested temporary project override takes precedence over conflicting ordinary routing preferences and learned rules in its scope, including the usual least-cost preference. It does not override hard restrictions unless the user explicitly changes them. Check the time again before each routing decision; an override that expires during a task does not cancel work already dispatched.
+
 Prefer the cheapest allowed candidate with enough evidence to satisfy acceptance. With little evidence, mark the choice provisional, use a bounded task, and arrange a check appropriate to its risk. A public leaderboard is a useful prior; it does not establish the best model for this user's workload.
 
 Use [tool adapters](guides/tool-adapters.md) for invocation boundaries and [PROMPTS.md](PROMPTS.md) for task briefs. For endpoints that may use inputs for training, send only data the user permits; public source still needs a secrets/private-context check.
@@ -59,11 +78,13 @@ A new release, stale evidence, a changed domain, or repeated rework is a reason 
 
 ## 5. Delegate, verify, record
 
-Give the worker the task, inputs, boundaries, acceptance checks, and report format. Keep tool-specific commands in adapters. Resume a suitable existing worker when that preserves relevant context cheaply; confirm its session/workspace identity.
+Give the worker the task, inputs, boundaries, acceptance checks, and report format. Keep tool-specific commands in adapters. Resume a suitable existing worker when that preserves relevant context cheaply; confirm its session/workspace identity. Follow [session reuse](guides/session-reuse.md): resume for rework, follow-ups and same-area tasks (Claude `SendMessage`, `codex exec resume <id>`, `opencode run -s <id>`); use a fresh session for a first independent review or an unrelated task.
 
 Verify the resulting artifact against acceptance. Self-written tests and a worker's claim alone do not establish correctness. Choose independent review when consequences warrant it, and follow the user's existing review rules.
 
 Write one ledger record after verification, including partial/failed outcomes. Do not turn unknown measurements into zeros or guesses. Preserve older records and use a stable record ID or idempotency marker to avoid duplicate writes. Read back the write.
+
+Write project attempts to the discovered project ledger; write non-project attempts to the selected global store. Do not duplicate project records globally. Promote a cross-project conclusion to global rules only with evidence; do not copy sensitive project details without authorization.
 
 When exposed by the tool, collect session/turn IDs and measured input, output, reasoning, cache-read/write usage with the task record. For a resumed session use a before/after usage delta or the exact task's turns; do not charge its entire previous history again. Follow [measurement and usage](guides/measurement-and-usage.md) for tool receipts, S/M/L comparisons, token accounting, and timing. Total session tokens divided by elapsed task time is an end-to-end rate, not pure model generation speed.
 

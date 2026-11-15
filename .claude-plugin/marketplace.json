@@ -64,14 +64,23 @@
     },
     {
       "name": "tooling",
-      "description": "Standalone developer utilities: scrub AI co-author trailers from git history, drive logged-in AI web sessions with Computer Use, drive a real logged-in ChatGPT session in Chrome, run Kunkun Browser AI workflows, turn Slidev decks into narrated MP4s, and safely audit or migrate macOS developer storage",
+      "description": "Standalone developer utilities for Git, computer use, and mobile SDKs",
       "source": "./",
       "strict": false,
       "skills": [
         "./skills/tooling/strip-ai-coauthors",
         "./skills/tooling/ai-web-computer-use",
-        "./skills/tooling/external-mobile-sdks",
-        "./skills/tooling/slidev-narrated-video"
+        "./skills/tooling/external-mobile-sdks"
+      ]
+    },
+    {
+      "name": "video-production",
+      "description": "Create narrated videos and animated concept explainers",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/video-production/slidev-narrated-video",
+        "./skills/video-production/animated-concept-explainer"
       ]
     }
   ]

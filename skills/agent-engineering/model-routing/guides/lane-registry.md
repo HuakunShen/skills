@@ -22,7 +22,7 @@ Before the run it archives the previous report as `<lane>.out.<n>` instead of de
 
 ## 3. Short reports
 
-Every brief ends with: final report at most 8 lines (commit or "uncommitted", what changed, tests and results, not verified), written to the result file. The orchestrator reads the result file, not the log. Resume nudges use one layer per message and "stopping after X is a failure".
+Every brief starts with: task id, base commit, write set, files and symbols to read first, acceptance commands, out of scope, when to stop. Every brief ends with: final report at most about 10 lines (commit or "uncommitted", changed files, the commit the tests ran on, each command with exit code and counts, findings and blockers, not verified, log path), written to the result file. The orchestrator reads the result file, not the log. Resume nudges use one layer per message and "stopping after X is a failure".
 
 ## 4. Measure the fresh-start cost once
 

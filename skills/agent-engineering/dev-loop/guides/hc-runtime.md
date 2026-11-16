@@ -51,9 +51,9 @@ hc wait lane-a --timeout 86400; hc get lane-a
 - Never `hc kill`, `hc rm` or `hc interrupt` a terminal you did not start. Another session's busy lanes say nothing about your queue.
 - Never use `nohup`, `setsid` or a bare `&` for a worker, and never write an `until`/`sleep` wait loop: the harness cannot list them, so the user sees one task where there are five. A read-only one-shot such as `codex exec` may run as a normal harness background job because the harness lists it.
 
-## Keep the lanes full
+## When to start another lane
 
-Idle capacity is a failure, not a resting state. At the end of every turn and whenever a wait returns, count your own live lanes; below the configured target (the xross owner's is 6) with a non-empty ready queue, start more before replying. "Blocked" is judged per task (owner decision, lab, device, host), never per project; a cargo lock only serialises the build step. Keep the ready queue as a file (rows blocked on nothing, no owner decision, no device) and pop from it. Reviews and verification run beside the lanes, not instead of starting new ones.
+Concurrency is a ceiling, not a floor (owner decision 2026-11-16, see [throughput](throughput.md); it replaces the earlier "keep the lanes full" target). Whenever a wait returns: verify and integrate that result first, then start another lane only if a ready task meets the bar in throughput section 1 (acceptance criteria, disjoint write set, free build slot, review capacity, quota above the reserve). "Blocked" is still judged per task (owner decision, lab, device, host), never per project, so one blocked area does not stop independent ready work. Keep the ready queue as one file (rows blocked on nothing) and pop from it; do not write a new queue file to refill slots.
 
 ## See and manage
 

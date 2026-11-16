@@ -50,6 +50,8 @@ The owner sends wishes and bugs in chat at any moment. **Before doing anything w
 
 Keep one main session per project that owns all lanes. Delegate a bounded task or related batch to a subagent or to another agent CLI (see [roles and briefs](guides/roles-and-briefs.md); choosing models is the job of the `model-routing` skill, which this skill defers to). Group work that benefits from the same context before choosing workers. Start independent lanes together within the user's concurrency and spending limits; account for duplicated discovery when deciding whether another worker helps.
 
+**Concurrency is a ceiling, never a floor.** Start a lane only for a ready task with acceptance criteria, a disjoint write set, a free build slot and review capacity; zero running lanes is fine when nothing qualifies. Verify and integrate finished work before opening new work, keep the orchestrator on a digest of at most about 5 KB, resume one worker per area, stop after the same error twice without new evidence, and keep about 20% quota in reserve. Full rules: [throughput](guides/throughput.md) (owner decision 2026-11-16; it replaces any "keep N lanes live" rule).
+
 Use bounded worker briefs with context manifests, reuse useful task context, and hand off when warranted. Select concurrency and model/effort through user policy, rather than maximizing worker count. For Codex, read the [Codex adapter](guides/codex.md) for fresh/fork/resume and custom-agent support. Measurement and host-specific options are in [token budget](guides/token-budget.md).
 
 ## 4. Reflect every 30 minutes
@@ -77,6 +79,7 @@ Continuing, finished, blocked on what, or a choice with a recommendation. The ow
 - [Customization](guides/customization.md): config file, instruction sources, stage patches, setup conversation.
 - [Codex adapter](guides/codex.md): worker TOML template, actual host capabilities, fresh/fork/resume and usage measurement.
 - [hc runtime](guides/hc-runtime.md): visible, named background workers with herdr-core (`hc`), blocking waits, labels that link a worker to a task.
+- [Throughput](guides/throughput.md): when to start a lane, close before you open, thin orchestrator, batched checks, five status levels.
 - [Token budget](guides/token-budget.md): what makes orchestration expensive, how to measure it, the levers.
 - [Failure modes](guides/failure-modes.md): problems already seen and their fixes.
 - Templates in `templates/`, a full config in `examples/config.full.json`.

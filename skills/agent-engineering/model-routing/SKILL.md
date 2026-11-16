@@ -82,6 +82,12 @@ Give the worker the task, inputs, boundaries, acceptance checks, and report form
 
 Verify the resulting artifact against acceptance. Self-written tests and a worker's claim alone do not establish correctness. Choose independent review when consequences warrant it, and follow the user's existing review rules.
 
+Three routing guards (owner decision 2026-11-16, details in the `dev-loop` skill's `guides/throughput.md`):
+
+- **Reserve:** keep about 20% of each provider's quota for independent reviews, hard debugging and release gates; check each provider's own remaining quota, never compare percentages across providers.
+- **Stop repeats:** the same error fingerprint twice without new evidence means stop, record the hypothesis, then change the approach or escalate one tier. Escalating is a routing event: record it.
+- **Do not switch the model of a running session** to change roles; hand off through files (plan, review report) to a session on the right model, so neither session loses its cache.
+
 Write one ledger record after verification, including partial/failed outcomes. Do not turn unknown measurements into zeros or guesses. Preserve older records and use a stable record ID or idempotency marker to avoid duplicate writes. Read back the write.
 
 Write project attempts to the discovered project ledger; write non-project attempts to the selected global store. Do not duplicate project records globally. Promote a cross-project conclusion to global rules only with evidence; do not copy sensitive project details without authorization.

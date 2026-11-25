@@ -375,6 +375,35 @@
             "null"
           ]
         },
+        "target_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "difficulty": {
+          "enum": [
+            "trivial",
+            "moderate",
+            "hard",
+            "non_consensus",
+            null
+          ]
+        },
+        "difficulty_score": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 5
+        },
+        "difficulty_rationale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "evidence_exception": {
           "type": "object",
           "required": [
@@ -984,6 +1013,29 @@
         "estimated_tokens": {
           "type": "integer",
           "minimum": 1
+        },
+        "media_duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "transcription": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "quality_flags": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "required": [

@@ -174,6 +174,26 @@ def validate_claim(c):
                 not finite_number(quality.get(k)) or quality[k] not in (0, 0.5, 1)
                 for k in ("directness", "independence", "traceability")):
             raise ValueError(f"{cid}: evidence_quality requires three scores from 0,0.5,1")
+    difficulty = c.get("difficulty")
+    if difficulty is not None and difficulty not in common.DIFFICULTY_TIERS:
+        raise ValueError(f"{cid}: invalid difficulty tier (expected one of {common.DIFFICULTY_TIERS})")
+    diff_score = c.get("difficulty_score")
+    if diff_score is not None and (type(diff_score) is not int or not 1 <= diff_score <= 5):
+        raise ValueError(f"{cid}: difficulty_score must be an integer from 1 to 5")
+    diff_rat = c.get("difficulty_rationale")
+    if diff_rat is not None and not isinstance(diff_rat, str):
+        raise ValueError(f"{cid}: difficulty_rationale must be a string or null")
+    if c["claim_type"] == "prediction":
+        stated_at = common.earliest_stated_at(c)
+        target_end = common.claim_target_deadline(c)
+        if stated_at and target_end:
+            ok, _, detail = common.check_prediction_temporal_order(
+                stated_at, target_end, common.claim_criteria_timezone(c)
+            )
+            if not ok:
+                raise ValueError(
+                    f"{cid}: prediction violates temporal guard ({detail}); reclassify as factual or fix window_end"
+                )
 
 
 def ratio(n, d, with_ci=False):
@@ -306,27 +326,118 @@ def core_metrics(claims, *, bootstrap_clusters=False):
     }
 
 
-def _horizon_bucket(c):
-    crit = c.get("criteria") or {}
-    defn = crit.get("definition") or {}
-    start, end = defn.get("window_start"), defn.get("window_end")
-    if not end:
-        return "undated"
-    if not start:
-        return "unknown_start"
+def _lead_time_days(c):
+    stated_at = common.earliest_stated_at(c)
+    target_end = common.claim_target_deadline(c)
+    if not stated_at or not target_end:
+        return None
     try:
-        s_dt = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
-        e_dt = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
-        days = (e_dt - s_dt).total_seconds() / 86400
+        ok, days, _ = common.check_prediction_temporal_order(
+            stated_at, target_end, common.claim_criteria_timezone(c)
+        )
     except ValueError:
+        return None
+    return days if ok else None
+
+
+def _horizon_bucket(c):
+    target_end = common.claim_target_deadline(c)
+    if not target_end:
+        return "undated"
+    stated_at = common.earliest_stated_at(c)
+    if not stated_at:
+        return "unknown_stated_at"
+    days = _lead_time_days(c)
+    if days is None:
         return "unknown"
-    if days <= 30:
-        return "le_30d"
-    if days <= 180:
-        return "1_to_6m"
-    if days <= 730:
-        return "6_to_24m"
-    return "gt_24m"
+    return common.horizon_bucket_for_days(days)
+
+
+def _prediction_difficulty_stats(claims, bootstrap_clusters=False):
+    preds = [c for c in claims if c["claim_type"] == "prediction"]
+    ordered_tiers = (*common.DIFFICULTY_TIERS, "unrated")
+    grouped = {tier: [] for tier in ordered_tiers}
+    for c in preds:
+        grouped[common.resolve_difficulty_tier(c)].append(c)
+    by_tier = {}
+    for tier in ordered_tiers:
+        group = grouped[tier]
+        if not group:
+            continue
+        tier_metrics = core_metrics(group, bootstrap_clusters=bootstrap_clusters)
+        t_scores = [c["difficulty_score"] for c in group if type(c.get("difficulty_score")) is int]
+        tier_metrics["mean_difficulty_score"] = round(statistics.mean(t_scores), 3) if t_scores else None
+        by_tier[tier] = tier_metrics
+    rated = [c for c in preds if common.resolve_difficulty_tier(c) != "unrated"]
+    non_trivial = [c for c in preds if common.resolve_difficulty_tier(c) in {"moderate", "hard", "non_consensus"}]
+    trivial = grouped["trivial"]
+    non_trivial_m = core_metrics(non_trivial, bootstrap_clusters=bootstrap_clusters)
+    trivial_m = core_metrics(trivial, bootstrap_clusters=bootstrap_clusters)
+    scores = [c["difficulty_score"] for c in preds if type(c.get("difficulty_score")) is int]
+    rated_cat_denom = trivial_m["categorical_n"] + non_trivial_m["categorical_n"]
+    return {
+        "total_predictions": len(preds),
+        "rated_n": len(rated),
+        "unrated_n": len(preds) - len(rated),
+        "mean_difficulty_score": round(statistics.mean(scores), 3) if scores else None,
+        "non_trivial_strict_support_rate": non_trivial_m["strict_support_rate"],
+        "trivial_strict_support_rate": trivial_m["strict_support_rate"],
+        "trivial_share_of_rated_categorical": ratio(trivial_m["categorical_n"], rated_cat_denom),
+        "by_tier": by_tier,
+    }
+
+
+def _prediction_horizon_stats(claims, bootstrap_clusters=False):
+    preds = [c for c in claims if c["claim_type"] == "prediction"]
+    dated = []
+    undated_n = unknown_stated_at_n = 0
+    for c in preds:
+        target_end = common.claim_target_deadline(c)
+        if not target_end:
+            undated_n += 1
+            continue
+        stated_at = common.earliest_stated_at(c)
+        if not stated_at:
+            unknown_stated_at_n += 1
+            continue
+        days = _lead_time_days(c)
+        if days is not None:
+            dated.append((c, days))
+    all_days = [d for _, d in dated]
+    supported_days = [
+        d for c, d in dated
+        if c["empirical"] and c["endorsement"] == "endorsed" and c["attribution_confidence"] == "high"
+        and c["accountability_eligible"] and c["due_for_assessment"]
+        and c["lifecycle"] == "resolved" and c["review_state"] == "accepted"
+        and quality_allows_verdict(c) and c["evaluation_mode"] == "categorical" and c["outcome"] == "supported"
+    ]
+    buckets = {}
+    for b in common.HORIZON_BUCKETS:
+        b_items = [(c, d) for c, d in dated if common.horizon_bucket_for_days(d) == b]
+        b_claims = [c for c, _ in b_items]
+        b_days = [d for _, d in b_items]
+        cm = core_metrics(b_claims, bootstrap_clusters=bootstrap_clusters)
+        buckets[b] = {
+            "count": len(b_claims),
+            "categorical_n": cm["categorical_n"],
+            "categorical_counts": cm["categorical_counts"],
+            "strict_support_rate": cm["strict_support_rate"],
+            "mean_lead_time_days": round(statistics.mean(b_days), 2) if b_days else None,
+            "median_lead_time_days": round(statistics.median(b_days), 2) if b_days else None,
+        }
+    return {
+        "total_predictions": len(preds),
+        "dated_n": len(dated),
+        "undated_n": undated_n,
+        "unknown_stated_at_n": unknown_stated_at_n,
+        "mean_lead_time_days": round(statistics.mean(all_days), 2) if all_days else None,
+        "median_lead_time_days": round(statistics.median(all_days), 2) if all_days else None,
+        "min_lead_time_days": round(min(all_days), 2) if all_days else None,
+        "max_lead_time_days": round(max(all_days), 2) if all_days else None,
+        "supported_mean_lead_time_days": round(statistics.mean(supported_days), 2) if supported_days else None,
+        "supported_median_lead_time_days": round(statistics.median(supported_days), 2) if supported_days else None,
+        "buckets": buckets,
+    }
 
 
 def _period_key(c):
@@ -423,8 +534,20 @@ def calculate(claims, coverage, *, composite=False, policy=None, occurrences=Non
                             for d in sorted({c["domain"] for c in claims})}
     metrics["by_period"] = {p: core_metrics([c for c in claims if _period_key(c) == p])
                             for p in sorted({_period_key(c) for c in claims})}
-    metrics["by_horizon"] = {h: core_metrics([c for c in claims if _horizon_bucket(c) == h])
-                             for h in sorted({_horizon_bucket(c) for c in claims})}
+    horizon_order = (*common.HORIZON_BUCKETS, "undated", "unknown_stated_at", "unknown")
+    present_horizons = {_horizon_bucket(c) for c in claims}
+    metrics["by_horizon"] = {
+        h: core_metrics([c for c in claims if _horizon_bucket(c) == h])
+        for h in horizon_order if h in present_horizons
+    }
+    diff_order = (*common.DIFFICULTY_TIERS, "unrated")
+    present_diffs = {common.resolve_difficulty_tier(c) for c in claims}
+    metrics["by_difficulty"] = {
+        tier: core_metrics([c for c in claims if common.resolve_difficulty_tier(c) == tier], bootstrap_clusters=bootstrap_clusters)
+        for tier in diff_order if tier in present_diffs
+    }
+    metrics["prediction_difficulty"] = _prediction_difficulty_stats(claims, bootstrap_clusters=bootstrap_clusters)
+    metrics["prediction_horizon"] = _prediction_horizon_stats(claims, bootstrap_clusters=bootstrap_clusters)
     metrics["selection_funnel"] = {
         "total_canonical_claims": len(claims),
         "empirical": sum(1 for c in claims if c["empirical"]),
@@ -448,6 +571,14 @@ def calculate(claims, coverage, *, composite=False, policy=None, occurrences=Non
         warnings.append(f"prediction_vs_factual_gap={abs(pred_rate - fact_rate):.3f}: inspect prediction and factual metrics separately")
     if metrics["not_assessed_operationalization_count"]:
         warnings.append(f"{metrics['not_assessed_operationalization_count']} claims marked not_assessed for operationalization")
+    pdiff = metrics["prediction_difficulty"]
+    triv_share = pdiff["trivial_share_of_rated_categorical"]["value"]
+    triv_rate = pdiff["trivial_strict_support_rate"]["value"]
+    nontriv_rate = pdiff["non_trivial_strict_support_rate"]["value"]
+    if triv_share is not None and triv_share >= 0.30 and (nontriv_rate is None or (triv_rate is not None and triv_rate - nontriv_rate > 0.10)):
+        warnings.append(
+            f"trivial_prediction_inflation: trivial predictions are {triv_share * 100:.1f}% of rated predictions; inspect non_trivial_strict_support_rate separately"
+        )
     metrics["warnings"] = warnings
     metrics["noncheckable_expression_share"] = None
     if occurrences is not None:
@@ -484,7 +615,8 @@ def atomic_write(path, text):
 
 
 def csv_text(claims):
-    cols = ["claim_id", "text", "domain", "claim_type", "family_id", "quantifiability", "verifiability",
+    cols = ["claim_id", "text", "domain", "claim_type", "family_id", "difficulty", "difficulty_score",
+            "lead_time_days", "quantifiability", "verifiability",
             "lifecycle", "outcome", "probability", "occurrence_ids", "evidence_ids"]
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=cols)
@@ -492,7 +624,10 @@ def csv_text(claims):
     for c in claims:
         row = {}
         for k in cols:
-            v = c.get(k)
+            if k == "lead_time_days":
+                v = c.get(k) if c.get(k) is not None else (_lead_time_days(c) if c.get("claim_type") == "prediction" else None)
+            else:
+                v = c.get(k)
             if isinstance(v, (list, dict)):
                 v = json.dumps(v, ensure_ascii=False)
             if isinstance(v, str) and (v.lstrip().startswith(("=", "+", "-", "@")) or v.startswith(("\t", "\r", "\n"))):
@@ -534,7 +669,20 @@ def score_run(args):
             if claim.get("lifecycle") == "resolved" and claim.get("review_state") == "accepted":
                 verify_acceptance(run, claim, policy_path=args.model_policy, snapshot=snapshot)
                 verified += 1
-        metrics = calculate(claims, coverage, composite=args.composite, policy=policy,
+        # Enrich working copies with earliest source published_at when first_stated_at is absent
+        # so temporal guards and lead-time statistics use real source publication timestamps.
+        occ_by_id = {o["occurrence_id"]: o for o in (occurrences or []) if isinstance(o, dict) and o.get("occurrence_id")}
+        sources_path = run / "sources.jsonl"
+        src_by_id = {s["source_id"]: s for s in audit.read_jsonl(sources_path) if isinstance(s, dict) and s.get("source_id")} if sources_path.exists() else {}
+        enriched_claims = []
+        for c in claims:
+            if not c.get("first_stated_at") and occ_by_id and src_by_id:
+                stated = common.earliest_stated_at(c, occ_by_id, src_by_id, cfg["scope"]["timezone"])
+                if stated:
+                    c = {**c, "first_stated_at": stated}
+            enriched_claims.append(c)
+        enriched_selected = [c for c in enriched_claims if args.subject_id is None or c.get("subject_id") == args.subject_id]
+        metrics = calculate(enriched_claims, coverage, composite=args.composite, policy=policy,
                             occurrences=occurrences, subject_id=args.subject_id,
                             bootstrap_clusters=getattr(args, "bootstrap_clusters", False))
         metrics["acceptance_verification"] = {
@@ -546,7 +694,7 @@ def score_run(args):
                                    for x in [args.claims, args.coverage, args.occurrences] if x}
         atomic_write(args.out, json.dumps(metrics, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
         if args.csv:
-            atomic_write(args.csv, csv_text(selected))
+            atomic_write(args.csv, csv_text(enriched_selected))
     return metrics
 
 

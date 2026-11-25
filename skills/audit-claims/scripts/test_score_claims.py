@@ -215,6 +215,112 @@ class ScoreClaimTests(unittest.TestCase):
         self.assertEqual(result['not_assessed_operationalization_count'], 1)
         self.assertEqual(result['adjudication_coverage']['denominator'], 1)
 
+    def test_prediction_difficulty_tiers_validation_and_non_trivial_breakdown(self):
+        rows = [
+            claim('t1', difficulty='trivial', difficulty_score=1,
+                  difficulty_rationale='Near-100% baseline: sun rises in the east.', outcome='supported'),
+            claim('t2', difficulty_score=1, outcome='supported'),
+            claim('m1', difficulty='moderate', difficulty_score=3, outcome='supported'),
+            claim('h1', difficulty='hard', difficulty_score=4, outcome='contradicted'),
+            claim('nc1', difficulty='non_consensus', difficulty_score=5, outcome='contradicted'),
+            claim('f1', claim_type='factual', outcome='supported'),
+        ]
+        result = self.calculate(rows)
+        pdiff = result['prediction_difficulty']
+        self.assertEqual(pdiff['total_predictions'], 5)
+        self.assertEqual(pdiff['rated_n'], 5)
+        self.assertEqual(pdiff['unrated_n'], 0)
+        self.assertAlmostEqual(pdiff['trivial_strict_support_rate']['value'], 1.0)
+        self.assertEqual(pdiff['trivial_strict_support_rate']['denominator'], 2)
+        self.assertAlmostEqual(pdiff['non_trivial_strict_support_rate']['value'], 1 / 3)
+        self.assertEqual(pdiff['non_trivial_strict_support_rate']['denominator'], 3)
+        self.assertAlmostEqual(pdiff['trivial_share_of_rated_categorical']['value'], 0.4)
+        self.assertIn('trivial', pdiff['by_tier'])
+        self.assertIn('non_consensus', pdiff['by_tier'])
+        self.assertTrue(any('trivial_prediction_inflation' in w for w in result['warnings']))
+        for bad_kwargs in (
+            {'difficulty': 'impossible'},
+            {'difficulty_score': 0},
+            {'difficulty_score': 6},
+            {'difficulty_score': True},
+            {'difficulty_rationale': 123},
+        ):
+            with self.subTest(bad=bad_kwargs), self.assertRaises(ValueError):
+                self.calculate([claim('bad', **bad_kwargs)])
+
+    def test_temporal_guard_rejects_retroactive_and_same_day_date_only_predictions(self):
+        def pred_with_dates(cid, stated, end, ctype='prediction'):
+            c = claim(cid, claim_type=ctype, first_stated_at=stated)
+            c['criteria']['definition']['window_end'] = end
+            c['criteria']['sha256'] = hashlib.sha256(scoring.canonical(c['criteria']['definition'])).hexdigest()
+            return c
+
+        # Oct 1 video talking about Sept 30 event cannot be a prediction.
+        with self.assertRaisesRegex(ValueError, 'temporal guard'):
+            self.calculate([pred_with_dates('retro_date', '2025-10-01', '2025-09-30')])
+        # Same-day date-only target cannot be proven post-statement.
+        with self.assertRaisesRegex(ValueError, 'temporal guard'):
+            self.calculate([pred_with_dates('same_day', '2025-10-01T14:00:00Z', '2025-10-01')])
+        # Exact datetime on or before statement time is rejected.
+        with self.assertRaisesRegex(ValueError, 'temporal guard'):
+            self.calculate([pred_with_dates('retro_dt', '2025-10-01T14:00:00Z', '2025-10-01T14:00:00Z')])
+        # Exact intraday datetime strictly after statement is allowed.
+        intraday = pred_with_dates('intraday_ok', '2025-10-01T09:00:00-04:00', '2025-10-01T16:00:00-04:00')
+        res = self.calculate([intraday])
+        self.assertEqual(res['prediction_horizon']['dated_n'], 1)
+        self.assertAlmostEqual(res['prediction_horizon']['mean_lead_time_days'], 0.29, places=2)
+        # Factual claim about a past event is completely valid.
+        fact = pred_with_dates('fact_past', '2025-10-01', '2025-09-30', ctype='factual')
+        self.assertEqual(self.calculate([fact])['categorical_n'], 1)
+
+    def test_prediction_lead_time_and_horizon_buckets(self):
+        def dated_pred(cid, stated, end, outcome='supported', difficulty=None, score=None):
+            c = claim(cid, first_stated_at=stated, outcome=outcome)
+            if difficulty is not None:
+                c['difficulty'] = difficulty
+            if score is not None:
+                c['difficulty_score'] = score
+            c['criteria']['definition']['window_end'] = end
+            c['criteria']['sha256'] = hashlib.sha256(scoring.canonical(c['criteria']['definition'])).hexdigest()
+            return c
+
+        undated = claim('u1', first_stated_at='2025-01-01', outcome='supported')
+        undated['criteria']['definition']['window_end'] = None
+        undated['criteria']['sha256'] = hashlib.sha256(scoring.canonical(undated['criteria']['definition'])).hexdigest()
+
+        rows = [
+            dated_pred('p15', '2025-01-01', '2025-01-16', 'supported', 'moderate', 3),       # 15d -> le_30d
+            dated_pred('p60', '2025-01-01', '2025-03-02', 'contradicted', 'hard', 4),         # 60d -> 31_90d
+            dated_pred('p120', '2025-01-01', '2025-05-01', 'supported', 'hard', 4),           # 120d -> 91_180d
+            dated_pred('p240', '2025-01-01', '2025-08-29', 'supported', 'non_consensus', 5),  # 240d -> 181_365d
+            dated_pred('p400', '2024-01-01', '2025-02-04', 'contradicted', 'non_consensus', 5),  # 400d -> gt_365d
+            undated,
+        ]
+        res = self.calculate(rows)
+        ph = res['prediction_horizon']
+        self.assertEqual(ph['total_predictions'], 6)
+        self.assertEqual(ph['dated_n'], 5)
+        self.assertEqual(ph['undated_n'], 1)
+        self.assertAlmostEqual(ph['mean_lead_time_days'], 167.0)
+        self.assertAlmostEqual(ph['median_lead_time_days'], 120.0)
+        self.assertAlmostEqual(ph['min_lead_time_days'], 15.0)
+        self.assertAlmostEqual(ph['max_lead_time_days'], 400.0)
+        # Supported predictions: 15, 120, 240 -> mean 125.0, median 120.0
+        self.assertAlmostEqual(ph['supported_mean_lead_time_days'], 125.0)
+        self.assertAlmostEqual(ph['supported_median_lead_time_days'], 120.0)
+        self.assertEqual(ph['buckets']['le_30d']['count'], 1)
+        self.assertEqual(ph['buckets']['le_30d']['strict_support_rate']['value'], 1.0)
+        self.assertEqual(ph['buckets']['31_90d']['strict_support_rate']['value'], 0.0)
+        self.assertEqual(ph['buckets']['91_180d']['strict_support_rate']['value'], 1.0)
+        self.assertEqual(ph['buckets']['181_365d']['strict_support_rate']['value'], 1.0)
+        self.assertEqual(ph['buckets']['gt_365d']['strict_support_rate']['value'], 0.0)
+        self.assertEqual(set(res['by_horizon']), {'le_30d', '31_90d', '91_180d', '181_365d', 'gt_365d', 'undated'})
+        exported = list(csv.DictReader(io.StringIO(scoring.csv_text(rows))))
+        by_id = {r['claim_id']: r for r in exported}
+        self.assertEqual(by_id['p120']['difficulty'], 'hard')
+        self.assertEqual(by_id['p120']['difficulty_score'], '4')
+        self.assertEqual(float(by_id['p120']['lead_time_days']), 120.0)
+
 
 if __name__ == '__main__':
     unittest.main()

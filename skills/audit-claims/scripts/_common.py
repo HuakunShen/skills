@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 import hashlib
 import json
 import math
@@ -12,6 +12,11 @@ from pathlib import Path
 import re
 import tempfile
 import unicodedata
+from zoneinfo import ZoneInfo
+
+DIFFICULTY_TIERS = ("trivial", "moderate", "hard", "non_consensus")
+DIFFICULTY_SCORE_TO_TIER = {1: "trivial", 2: "moderate", 3: "moderate", 4: "hard", 5: "non_consensus"}
+HORIZON_BUCKETS = ("le_30d", "31_90d", "91_180d", "181_365d", "gt_365d")
 
 BIDI_CONTROLS = frozenset({
     "\u200e", "\u200f", "\u061c",
@@ -165,3 +170,118 @@ def strip_bidi_controls(text):
 def normalize_quote_text(text):
     cleaned, _ = strip_bidi_controls(unicodedata.normalize("NFKC", str(text)).translate(QUOTE_TRANSLATION))
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _parse_tz_datetime(value, label):
+    parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} datetime requires a UTC offset")
+    return parsed
+
+
+def _timestamp_sort_key(value, zone):
+    text = str(value).strip()
+    if len(text) == 10:
+        dt = datetime.combine(date.fromisoformat(text), time.min, zone)
+        return dt.astimezone(timezone.utc)
+    return _parse_tz_datetime(text, "timestamp").astimezone(timezone.utc)
+
+
+def earliest_stated_at(claim, occurrences_by_id=None, sources_by_id=None, tz_name="UTC"):
+    for field in ("first_stated_at", "published_at"):
+        val = claim.get(field)
+        if nonempty(val):
+            return val.strip()
+    if occurrences_by_id and sources_by_id:
+        zone = ZoneInfo(tz_name or "UTC")
+        candidates = []
+        for oid in claim.get("occurrence_ids") or []:
+            occ = occurrences_by_id.get(oid)
+            if not isinstance(occ, dict):
+                continue
+            src = sources_by_id.get(occ.get("source_id"))
+            if not isinstance(src, dict):
+                continue
+            pub = src.get("published_at")
+            if nonempty(pub):
+                try:
+                    candidates.append((_timestamp_sort_key(pub, zone), pub.strip()))
+                except ValueError:
+                    continue
+        if candidates:
+            candidates.sort(key=lambda pair: pair[0])
+            return candidates[0][1]
+    return None
+
+
+def claim_target_deadline(claim):
+    crit = claim.get("criteria")
+    if isinstance(crit, dict):
+        defn = crit.get("definition")
+        if isinstance(defn, dict) and nonempty(defn.get("window_end")):
+            return defn["window_end"].strip()
+    if nonempty(claim.get("target_date")):
+        return claim["target_date"].strip()
+    return None
+
+
+def claim_criteria_timezone(claim, default="UTC"):
+    crit = claim.get("criteria")
+    if isinstance(crit, dict):
+        defn = crit.get("definition")
+        if isinstance(defn, dict) and nonempty(defn.get("timezone")):
+            return defn["timezone"].strip()
+    return default
+
+
+def check_prediction_temporal_order(stated_at, target_end, tz_name="UTC"):
+    """Validate target_end > stated_at for predictions and return (is_valid, lead_time_days, detail).
+
+    When both timestamps carry explicit time+timezone, compares exact UTC instants.
+    When either is date-only (YYYY-MM-DD), compares local calendar dates in tz_name
+    and requires target_day > stated_day so same-day or retroactive targets are caught.
+    """
+    if not nonempty(stated_at) or not nonempty(target_end):
+        return True, None, None
+    stated_str = stated_at.strip()
+    target_str = target_end.strip()
+    zone = ZoneInfo(tz_name or "UTC")
+    stated_is_date = len(stated_str) == 10
+    target_is_date = len(target_str) == 10
+    if not stated_is_date and not target_is_date:
+        stated_dt = _parse_tz_datetime(stated_str, "stated_at")
+        target_dt = _parse_tz_datetime(target_str, "target_end")
+        delta_days = (target_dt - stated_dt).total_seconds() / 86400.0
+        if delta_days <= 0:
+            return False, round(delta_days, 2), f"target_date ({target_str}) <= stated_at ({stated_str})"
+        return True, round(delta_days, 2), None
+    stated_day = date.fromisoformat(stated_str) if stated_is_date else _parse_tz_datetime(stated_str, "stated_at").astimezone(zone).date()
+    target_day = date.fromisoformat(target_str) if target_is_date else _parse_tz_datetime(target_str, "target_end").astimezone(zone).date()
+    delta_days = float((target_day - stated_day).days)
+    if delta_days <= 0:
+        return False, delta_days, f"target_date ({target_str}) <= stated_at ({stated_str}) in {tz_name or 'UTC'}"
+    return True, delta_days, None
+
+
+def horizon_bucket_for_days(days):
+    if days is None:
+        return None
+    if days <= 30:
+        return "le_30d"
+    if days <= 90:
+        return "31_90d"
+    if days <= 180:
+        return "91_180d"
+    if days <= 365:
+        return "181_365d"
+    return "gt_365d"
+
+
+def resolve_difficulty_tier(claim):
+    tier = claim.get("difficulty")
+    if tier in DIFFICULTY_TIERS:
+        return tier
+    score = claim.get("difficulty_score")
+    if type(score) is int and score in DIFFICULTY_SCORE_TO_TIER:
+        return DIFFICULTY_SCORE_TO_TIER[score]
+    return "unrated"

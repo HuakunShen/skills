@@ -467,6 +467,175 @@ class AuditRunTests(unittest.TestCase):
         self.assertEqual(by_cid['clm_hyp_late']['status'], 'not_checked')
         self.assertEqual(by_cid['clm_hyp_late']['evidence_ids'], ['s1'])
 
+    def test_same_day_as_of_clamped_to_wall_clock_time_across_timezones(self):
+        from datetime import timezone, timedelta
+        from zoneinfo import ZoneInfo
+        import audit_pipeline as pipeline
+
+        # Deterministic check at 04:00 UTC on 2026-11-26 (where 23:59:59 UTC would be +20h in the future).
+        fixed_now = datetime(2026, 11, 26, 4, 0, 0, tzinfo=timezone.utc)
+        utc_zone = ZoneInfo('UTC')
+        la_zone = ZoneInfo('America/Los_Angeles')
+        # Today in UTC (2026-11-26) clamps to 04:00 UTC rather than failing as future.
+        clamped_utc = audit.resolve_as_of_time('2026-11-26', utc_zone, now_utc=fixed_now)
+        self.assertEqual(clamped_utc, fixed_now)
+        # Past date in UTC stays 23:59:59.999999.
+        past_utc = audit.resolve_as_of_time('2026-11-25', utc_zone, now_utc=fixed_now)
+        self.assertEqual(past_utc.hour, 23)
+        self.assertEqual(past_utc.minute, 59)
+        # Today in LA at 04:00 UTC is still 2026-11-25 20:00 PST -> clamps to fixed_now.
+        clamped_la = audit.resolve_as_of_time('2026-11-25', la_zone, now_utc=fixed_now)
+        self.assertEqual(clamped_la.astimezone(timezone.utc), fixed_now)
+        # Tomorrow in UTC (2026-11-27) still fails without --allow-future-as-of.
+        with self.assertRaisesRegex(ValueError, 'future'):
+            audit.resolve_as_of_time('2026-11-27', utc_zone, now_utc=fixed_now)
+        # End-to-end init with real wall-clock today in UTC and America/Los_Angeles succeeds.
+        for tz_name in ('UTC', 'America/Los_Angeles', 'Asia/Singapore'):
+            zone = ZoneInfo(tz_name)
+            today_str = datetime.now(timezone.utc).astimezone(zone).date().isoformat()
+            run_dir = self.run.parent / f'today_{tz_name.replace("/", "_")}'
+            audit.init(Namespace(run=str(run_dir), subject='Today', start='2024-01-01',
+                                 end=today_str, as_of=today_str, timezone=tz_name,
+                                 cutoff_mode='retrospective'))
+            cfg = audit.config(run_dir)
+            saved_dt = datetime.fromisoformat(cfg['scope']['as_of'])
+            self.assertLessEqual(saved_dt, datetime.now(timezone.utc) + timedelta(seconds=5))
+            self.assertEqual(saved_dt.astimezone(zone).date().isoformat(), today_str)
+            # assess with today date-only also succeeds without future failure.
+            round_out = pipeline.new_assessment_round(audit, run_dir, today_str, reason='same_day_recheck')
+            self.assertEqual(round_out['newly_due_claims'], 0)
+
+    def test_temporal_guard_in_merge_freeze_criteria_and_validate(self):
+        import audit_pipeline as pipeline
+        self.sources([self.source('oct1', text='[#p-000001]\nYesterday Sept 30 closed above 500.\nNext year hits 700.\n',
+                                  published_at='2025-10-01')])
+        self.plan(budget=2000, max_items=10)
+        task = self.task()
+        shard = {
+            'task_id': task['task_id'], 'input_fingerprint': task['input_fingerprint'],
+            'complete': True, 'processed_source_ids': ['oct1'],
+            'claims': [
+                {'claim_id': 'c_retro', 'text': 'Event on Sept 30 happened', 'claim_type': 'prediction',
+                 'empirical': True, 'verifiability': 'verifiable', 'target_date': '2025-09-30',
+                 'occurrences': [{'source_id': 'oct1', 'original_quote': 'Yesterday Sept 30 closed above 500.',
+                                  'locator': {'kind': 'paragraph', 'unit_id': 'p-000001', 'start': 1, 'end': 1}}]},
+                {'claim_id': 'c_future', 'text': 'Next year hits 700', 'claim_type': 'prediction',
+                 'empirical': True, 'verifiability': 'verifiable',
+                 'occurrences': [{'source_id': 'oct1', 'original_quote': 'Next year hits 700.',
+                                  'locator': {'kind': 'paragraph', 'unit_id': 'p-000001', 'start': 1, 'end': 1}}]},
+            ],
+        }
+        res_rel = f"work/results/{task['task_id']}.json"
+        audit.write_json(self.run / res_rel, shard)
+        audit.checkpoint(Namespace(run=str(self.run), task_id=task['task_id'], status='completed', result=res_rel, note=None))
+        merged = pipeline.merge_extraction(audit, self.run)
+        self.assertEqual(merged['temporal_warnings'], 1)
+        by_id = {c['claim_id']: c for c in audit.read_jsonl(self.run / 'claims.jsonl')}
+        self.assertEqual(by_id['c_retro']['first_stated_at'], '2025-10-01')
+        self.assertEqual(by_id['c_retro']['review_state'], 'needs_review')
+        self.assertIn('temporal_guard_warning', by_id['c_retro'])
+        # Unfrozen retroactive prediction triggers a warning in validate.
+        val = audit.validate(self.run)
+        self.assertTrue(any('Temporal guard warning' in w for w in val['warnings']))
+        # Freezing retroactive criteria on a prediction is rejected.
+        bad_def = self.run / 'bad_def.json'
+        audit.write_json(bad_def, {'target': 'Sept 30 close', 'predicate': '>500', 'window_start': '2025-09-01',
+                                   'window_end': '2025-09-30', 'timezone': 'UTC', 'condition': 'unconditional',
+                                   'resolution_basis': 'explicit'})
+        with self.assertRaisesRegex(ValueError, 'temporal guard'):
+            pipeline.freeze_criteria(audit, self.run, 'c_retro', bad_def)
+        # Freezing valid future criteria with difficulty metadata succeeds and reports lead_time_days.
+        ok_def = self.run / 'ok_def.json'
+        audit.write_json(ok_def, {'target': 'Index', 'predicate': '>=700', 'window_start': '2025-10-02',
+                                  'window_end': '2026-01-29', 'timezone': 'UTC', 'condition': 'unconditional',
+                                  'resolution_basis': 'explicit'})
+        frozen = pipeline.freeze_criteria(audit, self.run, 'c_future', ok_def,
+                                          difficulty='hard', difficulty_score=4,
+                                          difficulty_rationale='Above consensus price target.')
+        self.assertEqual(frozen['lead_time_days'], 120.0)
+        updated = {c['claim_id']: c for c in audit.read_jsonl(self.run / 'claims.jsonl')}
+        self.assertEqual(updated['c_future']['difficulty'], 'hard')
+        self.assertEqual(updated['c_future']['difficulty_score'], 4)
+        # Hand-tampered frozen retroactive prediction fails audit.validate hard.
+        updated['c_retro']['criteria'] = {'definition': {'target': 't', 'predicate': 'p', 'window_start': '2025-09-01',
+                                                         'window_end': '2025-09-30', 'timezone': 'UTC',
+                                                         'condition': 'unconditional', 'resolution_basis': 'explicit'},
+                                          'version': '1', 'frozen_at': '2025-10-02T00:00:00Z', 'sha256': '0'*64}
+        audit.write_jsonl(self.run / 'claims.jsonl', list(updated.values()))
+        with self.assertRaisesRegex(ValueError, 'temporal guard'):
+            audit.validate(self.run)
+
+    def test_build_report_data_subject_id_filter_and_case_card_metadata(self):
+        import audit_pipeline as pipeline
+        self.sources([self.source('s1', text='Source text', published_at='2025-01-01')])
+        audit.write_jsonl(self.run / 'evidence.jsonl', [
+            {'evidence_id': 'ev1', 'title': 'Ev1', 'source_url': 'https://example.test/ev1',
+             'published_at': '2025-06-01', 'excerpt': 'Observed.'},
+        ])
+        claims = [
+            {
+                'schema_version': 1, 'claim_id': 'c_alice', 'subject_id': 'Alice',
+                'occurrence_ids': ['o_alice'], 'text': 'Alice predicts X by May 1', 'domain': 'macro',
+                'claim_type': 'prediction', 'empirical': True, 'endorsement': 'endorsed',
+                'attribution_confidence': 'high', 'accountability_eligible': True,
+                'quantifiability': 'numeric', 'verifiability': 'verifiable',
+                'lifecycle': 'resolved', 'outcome': 'supported', 'due_for_assessment': True,
+                'evaluation_mode': 'categorical', 'probability': None, 'probability_origin': 'none',
+                'event_occurred': None, 'first_stated_at': '2025-01-01',
+                'difficulty': 'hard', 'difficulty_score': 4, 'difficulty_rationale': 'Non-consensus call.',
+                'criteria': {'definition': {'target': 'X', 'predicate': 'occurred', 'window_start': '2025-01-02',
+                                            'window_end': '2025-05-01', 'timezone': 'UTC', 'condition': 'unconditional',
+                                            'resolution_basis': 'explicit'}, 'version': '1',
+                             'frozen_at': '2025-01-02T00:00:00Z', 'sha256': '0'*64},
+                'evidence_ids': ['ev1'], 'evidence_quality': None, 'review_state': 'accepted',
+            },
+            {
+                'schema_version': 1, 'claim_id': 'c_bob', 'subject_id': 'Bob',
+                'occurrence_ids': ['o_bob'], 'text': 'Bob predicts Y', 'domain': 'macro',
+                'claim_type': 'prediction', 'empirical': True, 'endorsement': 'quoted',
+                'attribution_confidence': 'high', 'accountability_eligible': True,
+                'quantifiability': 'numeric', 'verifiability': 'verifiable',
+                'lifecycle': 'resolved', 'outcome': 'contradicted', 'due_for_assessment': True,
+                'evaluation_mode': 'categorical', 'probability': None, 'probability_origin': 'none',
+                'event_occurred': None, 'criteria': None,
+                'evidence_ids': ['ev1'], 'evidence_quality': None, 'review_state': 'accepted',
+            },
+        ]
+        occs = [
+            {'schema_version': 1, 'occurrence_id': 'o_alice', 'claim_id': 'c_alice', 'source_id': 's1',
+             'speaker': 'Alice Host', 'original_quote': 'X will happen by May 1.',
+             'context_before': '', 'context_after': '', 'locator': {'kind': 'cue', 'start': 10.0, 'end': 15.0},
+             'endorsement': 'endorsed', 'language': 'en'},
+            {'schema_version': 1, 'occurrence_id': 'o_bob', 'claim_id': 'c_bob', 'source_id': 's1',
+             'speaker': 'Bob Guest', 'original_quote': 'Y will happen.',
+             'context_before': '', 'context_after': '', 'locator': {'kind': 'cue', 'start': 20.0, 'end': 25.0},
+             'endorsement': 'quoted', 'language': 'en'},
+        ]
+        audit.write_jsonl(self.run / 'claims.jsonl', claims)
+        audit.write_jsonl(self.run / 'occurrences.jsonl', occs)
+        audit.write_json(self.run / 'coverage.json', {
+            'schema_version': 1, 'eligible_sources': 1, 'acquired_sources': 1,
+            'extracted_sources': 1, 'inventory_complete': True, 'unresolved_review_issues': 0,
+        })
+        hashes = pipeline.report_hashes(audit, self.run, subject_id='Alice')
+        built = pipeline.build_report_data(audit, self.run, subject_id='Alice')
+        self.assertEqual(hashes['data_hash'], built['data_hash'])
+        self.assertEqual(hashes['claims_count'], 1)
+        data = audit.read_json(self.run / 'reports/report-data.json')
+        self.assertEqual(data['report']['subject'], 'Alice')
+        self.assertEqual([c['id'] for c in data['cases']], ['c_alice'])
+        card = data['cases'][0]
+        self.assertEqual(card['subject_id'], 'Alice')
+        self.assertEqual(card['speaker'], 'Alice Host')
+        self.assertEqual(card['endorsement'], 'endorsed')
+        self.assertEqual(card['difficulty'], 'hard')
+        self.assertEqual(card['difficulty_score'], 4)
+        self.assertEqual(card['difficulty_rationale'], 'Non-consensus call.')
+        self.assertEqual(card['lead_time_days'], 120.0)
+        self.assertEqual(card['occurrences'][0]['speaker'], 'Alice Host')
+        with self.assertRaisesRegex(ValueError, 'No claims found'):
+            pipeline.build_report_data(audit, self.run, subject_id='NonExistent')
+
     def _write_manifest(self, inp, filename):
         m = inp / 'manifest.jsonl'
         audit.write_jsonl(m, [{'source_id': 's1', 'title': 'Long', 'source_url': None,

@@ -54,6 +54,14 @@ I18N = {
         "scm_detail": "分类结果明细",
         "lifecycle_dist": "生命周期分布",
         "domain_breakdown": "分领域统计",
+        "difficulty_title": "预测难度分层",
+        "difficulty_non_trivial": "非平凡预测支持率",
+        "difficulty_tiers": {"trivial": "平凡 / 近确定", "moderate": "中等", "hard": "较难", "non_consensus": "反共识 / 高难", "unrated": "未评级"},
+        "th_tier": "难度等级", "th_claims": "预测数", "th_mean_score": "均分(1–5)",
+        "horizon_title": "预测提前期分布",
+        "horizon_mean_lead": "平均提前期", "horizon_median_lead": "中位提前期", "horizon_supported_lead": "命中平均提前期",
+        "th_horizon": "提前期区间", "th_avg_lead": "平均天数",
+        "horizon_buckets": {"le_30d": "≤30天", "31_90d": "31–90天", "91_180d": "91–180天", "181_365d": "181–365天", "gt_365d": ">365天"},
         "synthetic_banner": "<strong>合成演示数据</strong><span>人物、原话、核验案例与模型分数均为手工构造；未调用真实模型，也不代表真实人物。</span>",
         "mean_legend": "可用评分均值",
         "radar_title": "{n}维表达与可审计性雷达",
@@ -125,6 +133,14 @@ I18N = {
         "scm_detail": "Categorical Outcome Breakdown",
         "lifecycle_dist": "Lifecycle Distribution",
         "domain_breakdown": "By Domain",
+        "difficulty_title": "Prediction Difficulty Breakdown",
+        "difficulty_non_trivial": "Non-trivial prediction support rate",
+        "difficulty_tiers": {"trivial": "Trivial / Near-certain", "moderate": "Moderate", "hard": "Hard", "non_consensus": "Non-consensus", "unrated": "Unrated"},
+        "th_tier": "Difficulty Tier", "th_claims": "Predictions", "th_mean_score": "Mean (1–5)",
+        "horizon_title": "Prediction Lead-Time / Horizon",
+        "horizon_mean_lead": "Mean lead time", "horizon_median_lead": "Median lead time", "horizon_supported_lead": "Supported mean lead",
+        "th_horizon": "Horizon Bucket", "th_avg_lead": "Avg Lead (d)",
+        "horizon_buckets": {"le_30d": "≤30d", "31_90d": "31–90d", "91_180d": "91–180d", "181_365d": "181–365d", "gt_365d": ">365d"},
         "synthetic_banner": "<strong>Synthetic Demo Data</strong><span>Subject, quotes, evidence and scores are manually constructed; no real models were called.</span>",
         "mean_legend": "Available Mean",
         "radar_title": "{n}-Dimension Expression & Auditability Radar",
@@ -656,6 +672,64 @@ def objective_metrics(data, lang="zh"):
             for dom, sub in by_domain.items()
         )
         html_out += f'<div class="card" style="margin-bottom:20px"><div class="table-wrap"><table><thead><tr><th>{esc(t["domain_breakdown"])}</th><th>{esc(t["strict_support"])}</th><th>S/N</th><th>{esc(t["accountability"])}</th></tr></thead><tbody>{d_rows}</tbody></table></div></div>'
+
+    pdiff = m.get("prediction_difficulty") or {}
+    diff_tiers = pdiff.get("by_tier") or {}
+    if pdiff.get("rated_n") and diff_tiers:
+        nt_sr = pdiff.get("non_trivial_strict_support_rate") or {}
+        nt_caption = f'{t["difficulty_non_trivial"]}: {percent(nt_sr)} ({nt_sr.get("numerator", 0)}/{nt_sr.get("denominator", 0)})' if nt_sr.get("denominator") else t["difficulty_title"]
+        diff_rows = []
+        for tier_key in ("trivial", "moderate", "hard", "non_consensus", "unrated"):
+            sub = diff_tiers.get(tier_key)
+            if not sub:
+                continue
+            sr = sub.get("strict_support_rate") or {}
+            tier_label = t["difficulty_tiers"].get(tier_key, tier_key)
+            mean_s = fmt(sub.get("mean_difficulty_score"), 2) if sub.get("mean_difficulty_score") is not None else "—"
+            diff_rows.append(
+                f'<tr><td>{esc(tier_label)}</td><td>{sub.get("total_canonical_claims", 0)}</td>'
+                f'<td>{esc(percent(sr))}</td><td>{sr.get("numerator", 0)}/{sr.get("denominator", 0)}</td>'
+                f'<td>{esc(mean_s)}</td></tr>'
+            )
+        if diff_rows:
+            html_out += (
+                f'<div class="card" style="margin-bottom:20px"><div class="table-wrap"><table>'
+                f'<caption>{esc(t["difficulty_title"])} · {esc(nt_caption)}</caption>'
+                f'<thead><tr><th>{esc(t["th_tier"])}</th><th>{esc(t["th_claims"])}</th>'
+                f'<th>{esc(t["strict_support"])}</th><th>S/N</th><th>{esc(t["th_mean_score"])}</th></tr></thead>'
+                f'<tbody>{"".join(diff_rows)}</tbody></table></div></div>'
+            )
+
+    phor = m.get("prediction_horizon") or {}
+    hbuckets = phor.get("buckets") or {}
+    if phor.get("dated_n") and hbuckets:
+        lead_parts = [
+            f'{t["horizon_mean_lead"]}: {fmt(phor.get("mean_lead_time_days"), 1)}d',
+            f'{t["horizon_median_lead"]}: {fmt(phor.get("median_lead_time_days"), 1)}d',
+        ]
+        if phor.get("supported_mean_lead_time_days") is not None:
+            lead_parts.append(f'{t["horizon_supported_lead"]}: {fmt(phor.get("supported_mean_lead_time_days"), 1)}d')
+        h_rows = []
+        for bkey in ("le_30d", "31_90d", "91_180d", "181_365d", "gt_365d"):
+            bdata = hbuckets.get(bkey)
+            if not bdata or not bdata.get("count"):
+                continue
+            sr = bdata.get("strict_support_rate") or {}
+            blabel = t["horizon_buckets"].get(bkey, bkey)
+            avg_d = f'{bdata["mean_lead_time_days"]:.1f}d' if bdata.get("mean_lead_time_days") is not None else "—"
+            h_rows.append(
+                f'<tr><td>{esc(blabel)}</td><td>{bdata["count"]}</td>'
+                f'<td>{esc(percent(sr))}</td><td>{sr.get("numerator", 0)}/{sr.get("denominator", 0)}</td>'
+                f'<td>{esc(avg_d)}</td></tr>'
+            )
+        if h_rows:
+            html_out += (
+                f'<div class="card" style="margin-bottom:20px"><div class="table-wrap"><table>'
+                f'<caption>{esc(t["horizon_title"])} · {esc(" · ".join(lead_parts))}</caption>'
+                f'<thead><tr><th>{esc(t["th_horizon"])}</th><th>{esc(t["th_claims"])}</th>'
+                f'<th>{esc(t["strict_support"])}</th><th>S/N</th><th>{esc(t["th_avg_lead"])}</th></tr></thead>'
+                f'<tbody>{"".join(h_rows)}</tbody></table></div></div>'
+            )
     return html_out
 
 
@@ -746,7 +820,23 @@ def render_report(data, view="full", theme=None, rubric=None, lang="zh", expand_
         st_key = case.get("status", "not_checked")
         status, tone = t["status"][st_key], STATUS_TONES[st_key]
         quote_html = f'<blockquote class="quote">“{esc(case["original_quote"])}”</blockquote>' if isinstance(case.get("original_quote"), str) and case["original_quote"].strip() else ""
-        cases.append(f'<article class="card case"><div class="case-top"><h3>{esc(case["title"])}</h3>{badge(status,tone)}</div><p class="case-claim">{esc(case["claim"])}</p>{quote_html}<p>{esc(case["assessment"])}</p>{citation_links(data,case.get("evidence_ids") or [])}<p class="source-meta">{esc(case.get("notes") or "")}</p></article>')
+        badges = [badge(status, tone)]
+        if case.get("difficulty"):
+            d_label = t["difficulty_tiers"].get(case["difficulty"], case["difficulty"])
+            if case.get("difficulty_score") is not None:
+                d_label = f"{d_label} ({case['difficulty_score']}/5)"
+            badges.append(badge(d_label, "accent" if case["difficulty"] in {"hard", "non_consensus"} else "muted"))
+        if case.get("lead_time_days") is not None:
+            badges.append(badge(f'{case["lead_time_days"]:g}d', "muted"))
+        meta_bits = []
+        if case.get("speaker"):
+            meta_bits.append(str(case["speaker"]))
+        if case.get("endorsement"):
+            meta_bits.append(str(case["endorsement"]))
+        if case.get("notes"):
+            meta_bits.append(str(case["notes"]))
+        diff_rat_html = f'<p class="source-meta">{esc(case["difficulty_rationale"])}</p>' if isinstance(case.get("difficulty_rationale"), str) and case["difficulty_rationale"].strip() else ""
+        cases.append(f'<article class="card case"><div class="case-top"><h3>{esc(case["title"])}</h3><div>{" ".join(badges)}</div></div><p class="case-claim">{esc(case["claim"])}</p>{quote_html}<p>{esc(case["assessment"])}</p>{diff_rat_html}{citation_links(data,case.get("evidence_ids") or [])}<p class="source-meta">{esc(" · ".join(meta_bits))}</p></article>')
     case_section = f'<section id="cases" class="section"><div class="section-heading"><div><h2>{esc(t["cases_title"])}</h2><p class="section-description">{esc(t["cases_desc"])}</p></div></div><div class="cases">'+''.join(cases)+'</div></section>' if cases and view == "full" else ''
     c = data.get("coverage") or {}
     cost = data.get("costs") or {}

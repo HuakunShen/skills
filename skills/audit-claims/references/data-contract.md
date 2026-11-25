@@ -63,7 +63,7 @@ status=`ready|pending|failed|skipped|truncated`。获取失败保留原元数据
 
 支持 txt/md/srt/vtt/json。JSON 可为 `{text,segments?}`、`[{text,start,duration}]` 或转录示例的 `{response:{text,...}}` 包装。不识别时失败，不当作零观点。多语言 language 可保存字符串或列表；无需翻译才能分析，翻译不能替换原句。
 
-Markdown front matter 保存 source_id/title/source_url/published_at/language/transcript_method/raw_hash，正文保留 cue/paragraph 编号。source_url 本地来源可为 null。具体字段以 normalizer 的结果为准；不以文件名中的日期推断发表日期。source_id 用字母数字下划线连字符，不允许路径穿越。
+Markdown front matter 保存 source_id/title/source_url/published_at/language/transcript_method/raw_hash，正文保留 cue/paragraph 编号。可选透传 `media_duration_seconds`、`transcription`（转录引擎/模型/VAD 等对象）与 `quality_flags`（合并自动检测的 `stt_tail_hallucination` / `stt_repeated_cue_hallucination` / `stt_duration_overflow`），明细诊断写入 `sources/<id>.locators.json`。source_url 本地来源可为 null。具体字段以 normalizer 的结果为准；不以文件名中的日期推断发表日期。source_id 用字母数字下划线连字符，不允许路径穿越。
 
 切片需增加 parent_source_id、segment_index、start/end 原文位置和 overlap 范围；片段 ID 不算新一期。覆盖统计按 parent_source_id 回卷，逐片段证明并集覆盖父文本。相同自动字幕滚动片段可去技术重叠，但原始字幕保持不动，并保留原 cue 映射；真实重复表达不能误删。
 
@@ -88,6 +88,7 @@ endorsement=`endorsed|quoted|rejected|unclear`；转述别人的断言不自动�
 - 两条轴：quantifiability、verifiability；含糊和偏好不能混为一类。
 - 可检验性：accountability_eligible（有原文支持的清晰可操作规则）、criteria。
 - 状态：lifecycle、reason、due_for_assessment、outcome、resolved_at、next_check_at。
+- 预测难度与时间：可选 `difficulty`（`trivial|moderate|hard|non_consensus`）、`difficulty_score`（1–5）、`difficulty_rationale`（事前评估理由）、`first_stated_at`、`target_date`；带期限预测须满足 `window_end > first_stated_at`，脚本据此计算 `lead_time_days`。
 - 概率：evaluation_mode=`categorical|probabilistic|none`、probability、probability_origin=`explicit|inferred|none`、event_occurred。
 - 证据：evidence_ids、evidence_quality、review_state=`unreviewed|accepted|needs_review`。
 - 验收：正式 resolved 记录关联 acceptance={decision_path,decision_sha256,policy_hash}。adopt_verdict.py 复算已保存票/裁判决定，并将原记录、证据绑定与决定保存后才写入。

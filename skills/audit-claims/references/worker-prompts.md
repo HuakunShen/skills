@@ -45,6 +45,8 @@ worker 只写自己的任务结果文件，例如 `work/<task_id>/result.json` �
 拆分独立命题，保留父子关系、否定、条件、量词和适用范围。
 独立标注 claim_type、empirical、quantifiability、verifiability；不将没有数字的事实视为不可验证。
 提取原文明确的期限与概率；无法确定则 null 并给理由，不能补造。
+严格区分预测与事实的时间顺序：只有目标事件/截止日严格晚于发表时间（target_date > published_at）的断言才能标为 prediction；回顾已发生事件（例如 10 月 1 日视频评论 9 月 30 日事件）必须标为 factual。
+标题/封面与正文归属护栏（Title-vs-Speech Guardrail）：所有进入个人计分的 endorsed 断言必须有正文或口述转录中的 original_quote 支撑，绝不能仅凭标题党标题、封面数字或缩略图将主张归给说话者；若标题断言在正文中未提及、被弱化为假设/提问或被本人否定，不得标为 endorsed，须以正文原话为准（如需记录标题偏差，单独注明 source_surface="title_only"、endorsement="unclear"、attribution_confidence="low"）。
 记录原文中的确信措辞，不把“可能”“必然”等自动映射成数值概率。
 多人节目区分本人赞同、引用、反驳和未知归属。疑似转录错误列为复核项。
 
@@ -77,7 +79,9 @@ worker 只写自己的任务结果文件，例如 `work/<task_id>/result.json` �
 为可核验条目写出目标、单位、时间窗、成功/失败标准、条件、容差、证据类型。
 每个解释都引用原文，标注 explicit/context_inferred；不能通过查实际结果选择定义。
 使用原文发表时间和时区解析相对日期；缺少可靠期限时保留 missing_deadline。
-把分类、规则、解释依据和哈希交给协调者冻结，然后才建立核验任务。
+严格执行预测时间护栏：凡 claim_type=prediction 且有明确截止日者，必须满足 window_end 严格晚于 first_stated_at / source published_at；对已过去或同日未指明时刻的事件，改判为 factual，不得混入预测准确度分母。
+在查结果之前为预测评定事前难度（difficulty: trivial | moderate | hard | non_consensus，可选 difficulty_score: 1-5 与 difficulty_rationale）：明确区分“太阳从东边升起 / 近 100% 基准概率”的平凡预测（trivial）与需要实质判断或反共识的预测（moderate/hard/non_consensus），禁止事后根据结果倒推难度。
+把分类、规则、难度依据和哈希交给协调者冻结，然后才建立核验任务。
 
 概率明确的预测设 evaluation_mode=probabilistic；不要因为事件未发生就直接当作预测错误。
 未到期的条目设 pending；已到可判定时间设 ready；不可判定设 unscorable 并给原因。
@@ -137,8 +141,8 @@ claim_id：{claim_id}
 输入：{original_quote_locators_frozen_criteria_evidence_and_proposed_verdict}
 输出：{unique_review_path}
 
-检查归属/否定/条件是否忠于上下文；区分主张、引用、建议、假设与修辞。
-检查是否偷偷补了期限、调整阈值或使用截点以后的事件。
+检查归属/否定/条件是否忠于上下文；区分主张、引用、建议、假设与修辞；核对原话确来自正文/口述而非标题党标题或缩略图。
+检查是否偷偷补了期限、调整阈值或使用截点以后的事件；核对 prediction 的截止日严格晚于发表时间（无回溯事件伪装预测），且难度评级（difficulty）基于发表时基线而非事后结果。
 查看证据原文，核对数值、单位、日期、适用人群/范围和来源独立性。
 检查反证、替代解释、因果与相关性混淆；概率预测不可用单次输赢替代概率评分。
 检查重复记录、相关家族、修订历史、pending 与缺证据的状态，以及计分分母。

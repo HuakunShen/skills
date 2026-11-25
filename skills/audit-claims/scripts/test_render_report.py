@@ -291,6 +291,56 @@ class RenderReportTests(unittest.TestCase):
         self.assertIn('>Counterargument</tspan>', radar_en)
         self.assertIn('>Engagement</tspan>', radar_en)
 
+    def test_renders_prediction_difficulty_horizon_and_case_metadata_in_zh_and_en(self):
+        data = copy.deepcopy(self.data)
+        data['metrics']['prediction_difficulty'] = {
+            'total_predictions': 5, 'rated_n': 5, 'unrated_n': 0,
+            'mean_difficulty_score': 3.2,
+            'non_trivial_strict_support_rate': {'value': 0.5, 'numerator': 1, 'denominator': 2},
+            'trivial_strict_support_rate': {'value': 1.0, 'numerator': 2, 'denominator': 2},
+            'trivial_share_of_rated_categorical': {'value': 0.5, 'numerator': 2, 'denominator': 4},
+            'by_tier': {
+                'trivial': {'total_canonical_claims': 2, 'mean_difficulty_score': 1.0,
+                            'strict_support_rate': {'value': 1.0, 'numerator': 2, 'denominator': 2}},
+                'hard': {'total_canonical_claims': 2, 'mean_difficulty_score': 4.0,
+                         'strict_support_rate': {'value': 0.5, 'numerator': 1, 'denominator': 2}},
+            },
+        }
+        data['metrics']['prediction_horizon'] = {
+            'total_predictions': 5, 'dated_n': 4, 'undated_n': 1, 'unknown_stated_at_n': 0,
+            'mean_lead_time_days': 135.5, 'median_lead_time_days': 120.0,
+            'min_lead_time_days': 15.0, 'max_lead_time_days': 380.0,
+            'supported_mean_lead_time_days': 160.0, 'supported_median_lead_time_days': 160.0,
+            'buckets': {
+                'le_30d': {'count': 1, 'categorical_n': 1, 'strict_support_rate': {'value': 1.0, 'numerator': 1, 'denominator': 1}, 'mean_lead_time_days': 15.0},
+                '31_90d': {'count': 0, 'categorical_n': 0, 'strict_support_rate': {'value': None, 'numerator': 0, 'denominator': 0}, 'mean_lead_time_days': None},
+                '91_180d': {'count': 2, 'categorical_n': 2, 'strict_support_rate': {'value': 0.5, 'numerator': 1, 'denominator': 2}, 'mean_lead_time_days': 120.0},
+                '181_365d': {'count': 0, 'categorical_n': 0, 'strict_support_rate': {'value': None, 'numerator': 0, 'denominator': 0}, 'mean_lead_time_days': None},
+                'gt_365d': {'count': 1, 'categorical_n': 1, 'strict_support_rate': {'value': 0.0, 'numerator': 0, 'denominator': 1}, 'mean_lead_time_days': 380.0},
+            },
+        }
+        data['cases'][0].update({
+            'speaker': 'Host <A>', 'subject_id': 'Host <A>', 'endorsement': 'endorsed',
+            'difficulty': 'hard', 'difficulty_score': 4,
+            'difficulty_rationale': 'Pre-outcome rationale <escaped>.', 'lead_time_days': 120,
+        })
+        page_zh = renderer.render_report(data, lang='zh')
+        page_en = renderer.render_report(data, lang='en')
+        self.assertIn('预测难度分层', page_zh)
+        self.assertIn('非平凡预测支持率: 50.0% (1/2)', page_zh)
+        self.assertIn('预测提前期分布', page_zh)
+        self.assertIn('135.5d', page_zh)
+        self.assertIn('91–180天', page_zh)
+        self.assertIn('较难 (4/5)', page_zh)
+        self.assertIn('120d', page_zh)
+        self.assertIn('Host &lt;A&gt;', page_zh)
+        self.assertIn('Pre-outcome rationale &lt;escaped&gt;.', page_zh)
+        self.assertIn('Prediction Difficulty Breakdown', page_en)
+        self.assertIn('Non-trivial prediction support rate: 50.0% (1/2)', page_en)
+        self.assertIn('Prediction Lead-Time / Horizon', page_en)
+        self.assertIn('Hard (4/5)', page_en)
+        self.assertIn('91–180d', page_en)
+
 
 if __name__ == '__main__':
     unittest.main()

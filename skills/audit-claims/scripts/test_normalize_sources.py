@@ -236,6 +236,67 @@ class NormalizeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exceeds --max-bytes'):
             self.ingest([row], max_bytes=400)
 
+    def test_stt_tail_hallucination_duration_overflow_and_metadata_passthrough(self):
+        # 5 identical short cues at tail + end_seconds (12.5) > media_duration_seconds (10.0)
+        tail_json = {
+            'segments': [
+                {'id': 0, 'start': 0.0, 'end': 3.0, 'text': '欢迎收看本期节目，我们分析美联储降息预期。'},
+                {'id': 1, 'start': 5.0, 'end': 6.5, 'text': '谢谢观看。'},
+                {'id': 2, 'start': 6.5, 'end': 8.0, 'text': '谢谢观看！'},
+                {'id': 3, 'start': 8.0, 'end': 9.5, 'text': '谢谢观看'},
+                {'id': 4, 'start': 9.5, 'end': 11.0, 'text': '谢谢观看。'},
+                {'id': 5, 'start': 11.0, 'end': 12.5, 'text': '谢谢观看。'},
+            ]
+        }
+        # Mid-transcript 5x repetition (not at tail)
+        mid_json = {
+            'segments': [
+                {'id': 0, 'start': 0.0, 'end': 1.0, 'text': 'Thank you.'},
+                {'id': 1, 'start': 1.0, 'end': 2.0, 'text': 'Thank you.'},
+                {'id': 2, 'start': 2.0, 'end': 3.0, 'text': 'Thank you.'},
+                {'id': 3, 'start': 3.0, 'end': 4.0, 'text': 'Thank you.'},
+                {'id': 4, 'start': 4.0, 'end': 5.0, 'text': 'Thank you.'},
+                {'id': 5, 'start': 5.0, 'end': 9.0, 'text': 'Actual closing commentary.'},
+            ]
+        }
+        # Only 4 identical short cues (below threshold) and within duration -> clean
+        clean_json = {
+            'segments': [
+                {'id': i, 'start': float(i), 'end': float(i + 1), 'text': 'ok'} for i in range(4)
+            ]
+        }
+        stt_meta = {'engine': 'faster-whisper', 'model': 'large-v3', 'vad_filter': True, 'word_timestamps': True}
+        res = self.ingest([
+            self.item('tail_bad', json.dumps(tail_json, ensure_ascii=False), 'json',
+                      media_duration_seconds=10.0, transcription=stt_meta,
+                      quality_flags=['manual_review_requested', 'stt_tail_hallucination']),
+            self.item('mid_bad', json.dumps(mid_json, ensure_ascii=False), 'json',
+                      media_duration_seconds=10.0),
+            self.item('clean_stt', json.dumps(clean_json, ensure_ascii=False), 'json',
+                      media_duration_seconds=10.0, transcription={'engine': 'mlx-whisper'}),
+        ])
+        by_id = {r['source_id']: r for r in ledger.read_jsonl(self.run / 'sources.jsonl')}
+        self.assertEqual(by_id['tail_bad']['transcription'], stt_meta)
+        self.assertEqual(by_id['tail_bad']['media_duration_seconds'], 10.0)
+        # Deduplicated union of provided + auto-detected flags
+        self.assertEqual(by_id['tail_bad']['quality_flags'],
+                         ['manual_review_requested', 'stt_tail_hallucination', 'stt_duration_overflow'])
+        tail_loc = json.loads((self.run / 'sources/tail_bad.locators.json').read_text())
+        self.assertEqual(tail_loc['stt_quality_diagnostics']['duration_overflow']['overflow_cue_count'], 2)
+        self.assertAlmostEqual(tail_loc['stt_quality_diagnostics']['duration_overflow']['overflow_seconds'], 2.5)
+        self.assertTrue(tail_loc['stt_quality_diagnostics']['repeated_short_cue_runs'][0]['at_tail'])
+        # Raw cues are preserved, never silently dropped
+        self.assertEqual(len(tail_loc['locators']), 6)
+        self.assertEqual(by_id['mid_bad']['quality_flags'], ['stt_repeated_cue_hallucination'])
+        self.assertNotIn('quality_flags', by_id['clean_stt'])
+        self.assertEqual(by_id['clean_stt']['transcription'], {'engine': 'mlx-whisper'})
+        self.assertEqual({f['source_id'] for f in res['flagged_sources']}, {'tail_bad', 'mid_bad'})
+        # Invalid metadata rejected
+        with self.assertRaisesRegex(ValueError, 'transcription metadata'):
+            self.ingest([self.item('bad_tr', 'Hello', 'txt', transcription='not-a-dict')])
+        with self.assertRaisesRegex(ValueError, 'quality_flags'):
+            self.ingest([self.item('bad_qf', 'Hello', 'txt', quality_flags='not-a-list')])
+
 
 if __name__ == '__main__':
     unittest.main()

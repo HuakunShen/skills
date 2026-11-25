@@ -18,6 +18,68 @@ SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 TIMING = re.compile(r"^\s*((?:\d+:)?\d{2}:\d{2}(?:[.,]\d{1,3})?)\s+-->\s+((?:\d+:)?\d{2}:\d{2}(?:[.,]\d{1,3})?)(?:\s+.*)?$")
 VTT_INLINE_TAG = re.compile(r"</?(?:c(?:\.[^>\s]+)?|\d{2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?|b|i|u|v(?:\s+[^>]*)?|lang(?:\s+[^>]*)?)>", re.IGNORECASE)
 SPOOFED_LOCATOR = re.compile(r"<!--\s*audit-claims-locator:|^\[#(?:p|cue)-\d{6}[^\]]*\]", re.MULTILINE)
+STT_NORM_STRIP = re.compile(r"[\s\.,!?，。！？、；;：:…~\-—\"'“”‘’()（）\[\]【】]+")
+STT_REPEAT_MIN_RUN = 5
+STT_SHORT_CUE_MAX_CHARS = 40
+
+
+def detect_stt_quality_issues(cues, media_duration_seconds=None):
+    """Detect Whisper/STT tail-hallucination loops and duration overflow without dropping raw cues."""
+    flags = []
+    diagnostics = {}
+    if not cues:
+        return flags, diagnostics
+    repeated_runs = []
+    idx = 0
+    total = len(cues)
+    while idx < total:
+        norm = STT_NORM_STRIP.sub("", str(cues[idx].get("text", "")).lower())
+        if not norm or len(norm) > STT_SHORT_CUE_MAX_CHARS:
+            idx += 1
+            continue
+        end = idx + 1
+        while end < total:
+            nxt = STT_NORM_STRIP.sub("", str(cues[end].get("text", "")).lower())
+            if nxt != norm:
+                break
+            end += 1
+        run_len = end - idx
+        if run_len >= STT_REPEAT_MIN_RUN:
+            at_tail = end == total
+            entry = {
+                "start_index": idx,
+                "end_index": end - 1,
+                "count": run_len,
+                "text": str(cues[idx].get("text", "")).strip(),
+                "at_tail": at_tail,
+            }
+            if "start_seconds" in cues[idx]:
+                entry["start_seconds"] = cues[idx]["start_seconds"]
+            if "end_seconds" in cues[end - 1]:
+                entry["end_seconds"] = cues[end - 1]["end_seconds"]
+            repeated_runs.append(entry)
+        idx = end
+    if repeated_runs:
+        diagnostics["repeated_short_cue_runs"] = repeated_runs
+        if any(r["at_tail"] for r in repeated_runs):
+            flags.append("stt_tail_hallucination")
+        if any(not r["at_tail"] for r in repeated_runs):
+            flags.append("stt_repeated_cue_hallucination")
+    if media_duration_seconds is not None:
+        overflow_cues = [
+            cue for cue in cues
+            if cue.get("end_seconds") is not None and cue["end_seconds"] > media_duration_seconds
+        ]
+        if overflow_cues:
+            max_end = max(cue["end_seconds"] for cue in overflow_cues)
+            flags.append("stt_duration_overflow")
+            diagnostics["duration_overflow"] = {
+                "overflow_cue_count": len(overflow_cues),
+                "max_end_seconds": round(max_end, 3),
+                "media_duration_seconds": media_duration_seconds,
+                "overflow_seconds": round(max_end - media_duration_seconds, 3),
+            }
+    return flags, diagnostics
 
 
 def sha(data):
@@ -189,7 +251,7 @@ def subtitles(text, fmt, locator_mode="compact", clean_youtube_vtt=False):
         cues.append(entry)
         prev_raw_lines = cleaned_lines
     body, kind, count, locators = cue_body(cues, locator_mode=locator_mode)
-    return body, kind, count, locators, skipped_empty
+    return body, kind, count, locators, skipped_empty, cues
 
 
 def json_transcript(text, locator_mode="compact"):
@@ -209,7 +271,7 @@ def json_transcript(text, locator_mode="compact"):
             segments, prefix = value["segments"], prefix + ".segments"
         elif isinstance(full_text, str) and full_text.strip():
             body, kind, count, locators = paragraphs(full_text, locator_mode=locator_mode)
-            return body, kind, count, locators, 0
+            return body, kind, count, locators, 0, []
         else:
             raise ValueError("Unrecognized/empty transcript JSON; expected text or segments")
     elif isinstance(value, list) and value:
@@ -251,7 +313,7 @@ def json_transcript(text, locator_mode="compact"):
     if full_text and "".join(full_text.split()) != "".join("".join(cue["text"].split()) for cue in cues):
         raise ValueError("JSON text disagrees with segments; resolve alignment before normalization")
     body, kind, count, locators = cue_body(cues, locator_mode=locator_mode)
-    return body, kind, count, locators, skipped_empty
+    return body, kind, count, locators, skipped_empty, cues
 
 
 def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact", clean_youtube_vtt=False):
@@ -297,13 +359,31 @@ def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact",
     if not isinstance(method, str) or not method:
         raise ValueError(f"Source {sid} transcript_method must be a nonempty string")
     skipped_empty = 0
+    cues = []
     if fmt in {"txt", "md"}:
         body, locator_kind, locator_count, locators = paragraphs(text, locator_mode=locator_mode)
     elif fmt in {"srt", "vtt"}:
-        body, locator_kind, locator_count, locators, skipped_empty = subtitles(
+        body, locator_kind, locator_count, locators, skipped_empty, cues = subtitles(
             text, fmt, locator_mode=locator_mode, clean_youtube_vtt=clean_youtube_vtt)
     else:
-        body, locator_kind, locator_count, locators, skipped_empty = json_transcript(text, locator_mode=locator_mode)
+        body, locator_kind, locator_count, locators, skipped_empty, cues = json_transcript(text, locator_mode=locator_mode)
+    transcription = record.get("transcription")
+    if transcription is not None and not isinstance(transcription, dict):
+        raise ValueError(f"Source {sid} transcription metadata must be an object or null")
+    media_duration = record.get("media_duration_seconds")
+    if media_duration is None and isinstance(transcription, dict):
+        media_duration = transcription.get("media_duration_seconds")
+    if media_duration is None:
+        media_duration = record.get("duration_seconds")
+    if media_duration is not None:
+        media_duration = finite_number(media_duration, f"media_duration_seconds for {sid}")
+    provided_flags = record.get("quality_flags")
+    if provided_flags is not None:
+        if not isinstance(provided_flags, list) or any(not isinstance(f, str) or not f.strip() for f in provided_flags):
+            raise ValueError(f"Source {sid} quality_flags must be a list of nonempty strings or null")
+        provided_flags = [f.strip() for f in provided_flags]
+    detected_flags, stt_diagnostics = detect_stt_quality_issues(cues, media_duration_seconds=media_duration)
+    merged_flags = list(dict.fromkeys((provided_flags or []) + detected_flags))
     speakers_observed = sorted({loc["speaker"] for loc in locators if loc.get("speaker")})
     metadata = {"source_id": sid, "title": title, "source_url": url, "published_at": published,
                 "language": language, "transcript_method": method, "format": fmt,
@@ -313,13 +393,23 @@ def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact",
         metadata["speakers"] = record["speakers"]
     if speakers_observed:
         metadata["speakers_observed"] = speakers_observed
+    if media_duration is not None:
+        metadata["media_duration_seconds"] = media_duration
+    if transcription is not None:
+        metadata["transcription"] = transcription
+    if merged_flags or provided_flags is not None:
+        metadata["quality_flags"] = merged_flags
     fingerprint = ledger.digest(metadata)
     frontmatter = "---\n" + "".join(f"{key}: {json.dumps(value, ensure_ascii=False)}\n" for key, value in metadata.items()) + "---\n\n"
     normalized = (frontmatter + body).encode("utf-8")
-    sidecar = json.dumps({"schema_version": 1, "source_id": sid, "locator_kind": locator_kind,
-                          "locators": locators, "skipped_empty_cues": skipped_empty,
-                          "bidi_controls_stripped": bidi_removed},
-                         ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+    sidecar_obj = {"schema_version": 1, "source_id": sid, "locator_kind": locator_kind,
+                   "locators": locators, "skipped_empty_cues": skipped_empty,
+                   "bidi_controls_stripped": bidi_removed}
+    if merged_flags:
+        sidecar_obj["quality_flags"] = merged_flags
+    if stt_diagnostics:
+        sidecar_obj["stt_quality_diagnostics"] = stt_diagnostics
+    sidecar = json.dumps(sidecar_obj, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
     row = {**metadata, "status": "ready", "content_path": f"sources/{sid}.md",
            "locators_path": f"sources/{sid}.locators.json",
            "content_hash": __import__("hashlib").sha256(normalized).hexdigest(),
@@ -401,10 +491,15 @@ def ingest(args):
             ledger.write_jsonl(run / "sources.jsonl", list(merged.values()))
             ledger.event(run, "sources_normalized", source_ids=[item[0]["source_id"] for item in changed], append=allow_append)
             ledger.progress(run)
-        return {"normalized": len(changed), "unchanged": len(prepared) - len(changed),
-                "source_ids": [item[0]["source_id"] for item in prepared],
-                "inventory_sources": len(existing_rows) + sum(item[0]["source_id"] not in existing for item in changed),
-                "network_calls": 0}
+        flagged = [{"source_id": item[0]["source_id"], "quality_flags": item[0]["quality_flags"]}
+                   for item in prepared if item[0].get("quality_flags")]
+        res = {"normalized": len(changed), "unchanged": len(prepared) - len(changed),
+               "source_ids": [item[0]["source_id"] for item in prepared],
+               "inventory_sources": len(existing_rows) + sum(item[0]["source_id"] not in existing for item in changed),
+               "network_calls": 0}
+        if flagged:
+            res["flagged_sources"] = flagged
+        return res
 
 
 def atomic_bytes(path, data):

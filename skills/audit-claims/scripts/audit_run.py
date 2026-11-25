@@ -96,6 +96,27 @@ def as_of_time(value, zone):
     return parsed.astimezone(zone)
 
 
+def resolve_as_of_time(value, zone, *, allow_future=False, now_utc=None):
+    """Resolve --as-of for init/assess; clamp date-only today to current wall-clock time."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    if len(value) == 10:
+        target_day = date.fromisoformat(value)
+        today_local = now_utc.astimezone(zone).date()
+        if target_day > today_local:
+            if not allow_future:
+                raise ValueError("--as-of cannot be in the future without --allow-future-as-of")
+            return datetime.combine(target_day, time.max, zone)
+        if target_day == today_local and not allow_future:
+            return now_utc.astimezone(zone)
+        return datetime.combine(target_day, time.max, zone)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("Datetime --as-of must include a UTC offset; dates use local end-of-day")
+    if not allow_future and parsed.astimezone(timezone.utc) > now_utc + timedelta(minutes=5):
+        raise ValueError("--as-of cannot be in the future without --allow-future-as-of")
+    return parsed.astimezone(zone)
+
+
 def publication_day(value, zone):
     if not isinstance(value, str):
         raise ValueError("Missing publication date")
@@ -243,12 +264,9 @@ def init(args):
     run = Path(args.run).resolve()
     zone = ZoneInfo(args.timezone)
     start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
-    as_of = as_of_time(args.as_of, zone)
+    as_of = resolve_as_of_time(args.as_of, zone, allow_future=bool(getattr(args, "allow_future_as_of", False)))
     if start > end or end > as_of.date():
         raise ValueError("Require start <= end <= the local as-of date")
-    if not getattr(args, "allow_future_as_of", False):
-        if as_of.astimezone(timezone.utc) > datetime.now(timezone.utc) + timedelta(hours=14):
-            raise ValueError("--as-of cannot be in the future without --allow-future-as-of")
     body = {"schema_version": VERSION, "subject": args.subject,
             "scope": {"start": str(start), "end": str(end), "timezone": args.timezone,
                       "as_of": as_of.astimezone(timezone.utc).isoformat()},
@@ -493,9 +511,12 @@ def validate(run):
         if task["status"] == "completed":
             if check_result(run, task, task.get("result_path")) != task.get("result_hash"):
                 raise ValueError(f"Completed result changed: {task['task_id']}")
-    source_ids = {row["source_id"] for row in read_jsonl(run / "sources.jsonl")}
+    source_rows = read_jsonl(run / "sources.jsonl")
+    sources_by_id = {row["source_id"]: row for row in source_rows}
+    source_ids = set(sources_by_id)
     occurrences = read_jsonl(run / "occurrences.jsonl") if (run / "occurrences.jsonl").exists() else []
-    occ_ids = set(unique(occurrences, "occurrence_id", "occurrences"))
+    occ_by_id = unique(occurrences, "occurrence_id", "occurrences")
+    occ_ids = set(occ_by_id)
     for occ in occurrences:
         if occ.get("source_id") not in source_ids:
             raise ValueError(f"Occurrence refers to a missing source: {occ['occurrence_id']}")
@@ -513,6 +534,21 @@ def validate(run):
             for eid in claim.get("evidence_ids", []):
                 if eid not in evidence_ids:
                     raise ValueError(f"Claim {claim['claim_id']} refers to missing evidence: {eid}")
+        if claim.get("claim_type") == "prediction":
+            stated_at = common.earliest_stated_at(claim, occ_by_id, sources_by_id, cfg["scope"]["timezone"])
+            target_end = common.claim_target_deadline(claim)
+            if stated_at and target_end:
+                ok, _, detail = common.check_prediction_temporal_order(
+                    stated_at, target_end, common.claim_criteria_timezone(claim, cfg["scope"]["timezone"])
+                )
+                if not ok:
+                    if claim.get("criteria") is not None or claim.get("accountability_eligible"):
+                        raise ValueError(
+                            f"Prediction {claim['claim_id']} violates temporal guard ({detail}); reclassify as factual or fix window_end"
+                        )
+                    warnings.append(
+                        f"Temporal guard warning for unfrozen prediction {claim['claim_id']}: {detail}; reclassify as factual before freezing criteria"
+                    )
     if excluded:
         warnings.append(f"{len(excluded)} sources are excluded or unavailable; see plan.json")
     if any(task["status"] != "completed" for task in tasks):
@@ -563,6 +599,9 @@ def parser():
     freeze.add_argument("--claim-id", required=True)
     freeze.add_argument("--definition", required=True)
     freeze.add_argument("--version", default="1")
+    freeze.add_argument("--difficulty", choices=list(common.DIFFICULTY_TIERS), help="Optional pre-outcome prediction difficulty tier")
+    freeze.add_argument("--difficulty-score", type=int, choices=[1, 2, 3, 4, 5], help="Optional pre-outcome prediction difficulty score (1=trivial..5=non_consensus)")
+    freeze.add_argument("--difficulty-rationale", help="Optional pre-outcome rationale explaining baseline/consensus difficulty")
     merge = commands.add_parser("merge-extraction", help="Merge completed extraction shards and verify quotes against sources")
     merge.add_argument("--run", required=True)
     merge.add_argument("--results", nargs="*")
@@ -581,6 +620,7 @@ def parser():
     rep.add_argument("--metrics", default="reports/metrics.json")
     rep.add_argument("--coverage", default="coverage.json")
     rep.add_argument("--rubric", help="Optional custom rubric JSON path (defaults to assets/evaluation-rubric.json)")
+    rep.add_argument("--subject-id", help="Filter claims and cases to a single subject_id")
     rep.add_argument("--title")
     rep.add_argument("--synthetic", action="store_true")
     rhash = commands.add_parser("report-hashes", help="Print exact data_hash and rubric_hash required by Phase 7 model reviews before build-report-data")
@@ -588,6 +628,7 @@ def parser():
     rhash.add_argument("--metrics", default="reports/metrics.json")
     rhash.add_argument("--coverage", default="coverage.json")
     rhash.add_argument("--rubric", help="Optional custom rubric JSON path (defaults to assets/evaluation-rubric.json)")
+    rhash.add_argument("--subject-id", help="Filter claims to a single subject_id (must match build-report-data)")
     hexp = commands.add_parser("handoff-export", help="Export a self-contained external AI handoff packet")
     hexp.add_argument("--run", required=True)
     hexp.add_argument("--task-ids", nargs="+", required=True)
@@ -613,7 +654,11 @@ def main(argv=None):
         elif args.command == "bind-policy":
             output = pipeline.bind_policy(sys.modules[__name__], args.run, args.model_policy, args.rules_json, args.allow_rebind, args.reason)
         elif args.command == "freeze-criteria":
-            output = pipeline.freeze_criteria(sys.modules[__name__], args.run, args.claim_id, args.definition, args.version)
+            output = pipeline.freeze_criteria(
+                sys.modules[__name__], args.run, args.claim_id, args.definition, args.version,
+                difficulty=args.difficulty, difficulty_score=args.difficulty_score,
+                difficulty_rationale=args.difficulty_rationale,
+            )
         elif args.command == "merge-extraction":
             output = pipeline.merge_extraction(sys.modules[__name__], args.run, args.results, args.strict_quotes)
         elif args.command == "coverage":
@@ -621,9 +666,15 @@ def main(argv=None):
         elif args.command == "assess":
             output = pipeline.new_assessment_round(sys.modules[__name__], args.run, args.as_of, args.reason)
         elif args.command == "build-report-data":
-            output = pipeline.build_report_data(sys.modules[__name__], args.run, args.out, args.metrics, args.coverage, args.title, args.synthetic, rubric_path=args.rubric)
+            output = pipeline.build_report_data(
+                sys.modules[__name__], args.run, args.out, args.metrics, args.coverage,
+                args.title, args.synthetic, rubric_path=args.rubric, subject_id=args.subject_id,
+            )
         elif args.command == "report-hashes":
-            output = pipeline.report_hashes(sys.modules[__name__], args.run, args.metrics, args.coverage, rubric_path=args.rubric)
+            output = pipeline.report_hashes(
+                sys.modules[__name__], args.run, args.metrics, args.coverage,
+                rubric_path=args.rubric, subject_id=args.subject_id,
+            )
         elif args.command == "handoff-export":
             output = pipeline.handoff_export(sys.modules[__name__], args.run, args.task_ids, args.packet_id)
         elif args.command == "handoff-import":

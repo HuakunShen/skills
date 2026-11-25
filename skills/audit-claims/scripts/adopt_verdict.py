@@ -197,6 +197,14 @@ def recompute(run, claim, saved, policy, snapshot=None, *, strict_freeze_order=F
     end = definition.get("window_end")
     if end and audit.as_of_time(end, crit_zone) > instant(cfg["scope"]["as_of"], "as_of"):
         raise ValueError("Prediction deadline has not arrived; the v1 automatic gate does not adopt early resolutions")
+    if claim.get("claim_type") == "prediction" and end:
+        occurrences = rows_by_id(run, "occurrences.jsonl", "occurrence_id", snapshot)
+        sources = rows_by_id(run, "sources.jsonl", "source_id", snapshot)
+        stated_at = common.earliest_stated_at(claim, occurrences, sources, cfg["scope"]["timezone"])
+        if stated_at:
+            ok, _, detail = common.check_prediction_temporal_order(stated_at, end, crit_tz_name)
+            if not ok:
+                raise ValueError(f"Prediction {claim['claim_id']} violates temporal guard ({detail}); reclassify as factual")
     allow_indet = bool(saved.get("terminal_indeterminate")) or (
         isinstance(saved.get("decision"), dict) and saved["decision"].get("verdict") == "indeterminate"
     )

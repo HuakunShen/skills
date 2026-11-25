@@ -161,7 +161,8 @@ def bind_policy(ledger, run, model_policy_path=None, rules_json=None, allow_rebi
         return {"run_id": cfg["run_id"], "config_hash": cfg["config_hash"], "models": cfg["models"], "rules": cfg["rules"]}
 
 
-def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
+def freeze_criteria(ledger, run, claim_id, definition_path, version="1", *,
+                    difficulty=None, difficulty_score=None, difficulty_rationale=None):
     run = Path(run).resolve()
     definition = common.read_json(Path(definition_path))
     if not isinstance(definition, dict):
@@ -174,6 +175,12 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
         raise ValueError("Criteria target, predicate and timezone must be nonempty strings")
     if definition["resolution_basis"] not in {"explicit", "interpretation"}:
         raise ValueError("resolution_basis must be explicit or interpretation")
+    if difficulty is not None and difficulty not in common.DIFFICULTY_TIERS:
+        raise ValueError(f"difficulty must be one of {common.DIFFICULTY_TIERS}")
+    if difficulty_score is not None and (type(difficulty_score) is not int or not 1 <= difficulty_score <= 5):
+        raise ValueError("difficulty_score must be an integer from 1 to 5")
+    if difficulty_rationale is not None and not isinstance(difficulty_rationale, str):
+        raise ValueError("difficulty_rationale must be a string")
     crit_zone = ZoneInfo(definition["timezone"])
     with ledger.coordinator_lock(run):
         cfg = ledger.config(run)
@@ -184,6 +191,22 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
         claim = by_id[claim_id]
         if claim.get("criteria") is not None:
             raise ValueError(f"Claim {claim_id} already has frozen criteria; use reopen for revisions")
+        end = definition.get("window_end")
+        lead_time_days = None
+        if claim.get("claim_type") == "prediction" and end:
+            occ_rows = ledger.read_jsonl(run / "occurrences.jsonl") if (run / "occurrences.jsonl").exists() else []
+            occ_by_id = {o["occurrence_id"]: o for o in occ_rows if isinstance(o, dict) and o.get("occurrence_id")}
+            src_rows = ledger.read_jsonl(run / "sources.jsonl") if (run / "sources.jsonl").exists() else []
+            src_by_id = {s["source_id"]: s for s in src_rows if isinstance(s, dict) and s.get("source_id")}
+            stated_at = common.earliest_stated_at(claim, occ_by_id, src_by_id, cfg["scope"]["timezone"])
+            if stated_at:
+                ok, lead_time_days, detail = common.check_prediction_temporal_order(
+                    stated_at, end, definition["timezone"]
+                )
+                if not ok:
+                    raise ValueError(
+                        f"Prediction {claim_id} violates temporal guard ({detail}); reclassify as factual or fix window_end"
+                    )
         sha = hashlib.sha256(common.canonical(definition).encode("utf-8")).hexdigest()
         frozen_at = common.now()
         criteria_obj = {"version": str(version), "frozen_at": frozen_at, "definition": definition, "sha256": sha}
@@ -191,12 +214,17 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
         snap_path = ledger.inside(run, snap_rel)
         if not snap_path.exists():
             common.write_json(snap_path, criteria_obj)
-        end = definition.get("window_end")
         as_of_dt = datetime.fromisoformat(cfg["scope"]["as_of"].replace("Z", "+00:00"))
         due = True if not end else ledger.as_of_time(end, crit_zone) <= as_of_dt
         if definition.get("condition") not in (None, "unconditional", "") and definition.get("trigger_state") in {"unmet", "unknown"}:
             due = False
         claim["criteria"] = criteria_obj
+        if difficulty is not None:
+            claim["difficulty"] = difficulty
+        if difficulty_score is not None:
+            claim["difficulty_score"] = difficulty_score
+        if difficulty_rationale is not None:
+            claim["difficulty_rationale"] = difficulty_rationale
         claim["accountability_eligible"] = bool(claim.get("empirical")) and claim.get("verifiability") in {"verifiable", "conditional"}
         claim["operationalization_status"] = "operationalized" if claim["accountability_eligible"] else "not_operationalizable"
         claim["due_for_assessment"] = due if claim["accountability_eligible"] else False
@@ -204,7 +232,10 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
             claim["lifecycle"] = "ready" if claim["due_for_assessment"] else "pending"
         ledger.write_jsonl(run / "claims.jsonl", claims)
         ledger.event(run, "criteria_frozen", claim_id=claim_id, criteria_sha256=sha, frozen_at=frozen_at, due=claim["due_for_assessment"])
-        return {"claim_id": claim_id, "criteria_sha256": sha, "frozen_at": frozen_at, "due_for_assessment": claim["due_for_assessment"]}
+        res = {"claim_id": claim_id, "criteria_sha256": sha, "frozen_at": frozen_at, "due_for_assessment": claim["due_for_assessment"]}
+        if lead_time_days is not None:
+            res["lead_time_days"] = lead_time_days
+        return res
 
 
 def _verify_quote_in_source(source_text, locator, quote):
@@ -254,7 +285,7 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
         claims = ledger.read_jsonl(run / "claims.jsonl")
         claim_by_id = ledger.unique(claims, "claim_id", "claims")
         source_texts = {}
-        added_occ = added_claims = unverified_quotes = 0
+        added_occ = added_claims = unverified_quotes = temporal_warnings = 0
         for p in paths:
             shard = common.read_json(p)
             if shard.get("complete") is not True:
@@ -331,14 +362,31 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                         if key == "family_id" and not value:
                             continue
                         c_rec[key] = value
+                    if not c_rec.get("first_stated_at"):
+                        inferred_stated = common.earliest_stated_at(c_rec, occ_by_id, sources, cfg["scope"]["timezone"])
+                        if inferred_stated:
+                            c_rec["first_stated_at"] = inferred_stated
+                    if c_rec.get("claim_type") == "prediction":
+                        stated = common.earliest_stated_at(c_rec, occ_by_id, sources, cfg["scope"]["timezone"])
+                        target_end = common.claim_target_deadline(c_rec)
+                        if stated and target_end:
+                            ok_t, _, detail_t = common.check_prediction_temporal_order(
+                                stated, target_end, common.claim_criteria_timezone(c_rec, cfg["scope"]["timezone"])
+                            )
+                            if not ok_t:
+                                c_rec["review_state"] = "needs_review"
+                                c_rec["temporal_guard_warning"] = detail_t
+                                temporal_warnings += 1
                     claim_by_id[cid] = c_rec
                     claims.append(c_rec)
                     added_claims += 1
         ledger.write_jsonl(run / "occurrences.jsonl", occurrences)
         ledger.write_jsonl(run / "claims.jsonl", claims)
-        ledger.event(run, "extraction_merged", added_occurrences=added_occ, added_claims=added_claims, unverified_quotes=unverified_quotes)
+        ledger.event(run, "extraction_merged", added_occurrences=added_occ, added_claims=added_claims,
+                     unverified_quotes=unverified_quotes, temporal_warnings=temporal_warnings)
         return {"added_occurrences": added_occ, "added_claims": added_claims,
-                "unverified_quotes": unverified_quotes, "total_occurrences": len(occurrences), "total_claims": len(claims)}
+                "unverified_quotes": unverified_quotes, "temporal_warnings": temporal_warnings,
+                "total_occurrences": len(occurrences), "total_claims": len(claims)}
 
 
 def compute_coverage(ledger, run, out_path="coverage.json", inventory_complete=True):
@@ -409,9 +457,7 @@ def new_assessment_round(ledger, run, new_as_of, reason="scheduled_reassessment"
     with ledger.coordinator_lock(run):
         cfg = ledger.config(run)
         zone = ZoneInfo(cfg["scope"]["timezone"])
-        as_of_dt = ledger.as_of_time(new_as_of, zone)
-        if as_of_dt > datetime.now(timezone.utc) + __import__("datetime").timedelta(minutes=5):
-            raise ValueError("Assessment --as-of cannot be in the future")
+        as_of_dt = ledger.resolve_as_of_time(new_as_of, zone)
         rounds = cfg.setdefault("assessment_rounds", [])
         rounds.append({"as_of": cfg["scope"]["as_of"], "config_hash": cfg["config_hash"], "closed_at": common.now()})
         cfg["scope"]["as_of"] = as_of_dt.astimezone(timezone.utc).isoformat()
@@ -502,12 +548,17 @@ def _extract_decision_rationale(ledger, run, claim):
     return f"lifecycle={claim['lifecycle']}, mode={claim['evaluation_mode']}"
 
 
-def _compute_report_inputs(ledger, run, metrics_path="reports/metrics.json", coverage_path="coverage.json", rubric_path=None):
+def _compute_report_inputs(ledger, run, metrics_path="reports/metrics.json", coverage_path="coverage.json",
+                           rubric_path=None, subject_id=None):
     metrics_file = ledger.inside(run, metrics_path)
     cov_file = ledger.inside(run, coverage_path)
     metrics = common.read_json(metrics_file) if metrics_file.exists() else None
     coverage = common.read_json(cov_file) if cov_file.exists() else {}
     claims = ledger.read_jsonl(run / "claims.jsonl")
+    if subject_id is not None:
+        claims = [c for c in claims if c.get("subject_id") == subject_id]
+        if not claims:
+            raise ValueError(f"No claims found for selected subject_id: {subject_id}")
     r_path, rubric, rubric_hash = _resolve_rubric(rubric_path)
     data_hash = common.digest({"claims": claims, "coverage": coverage, "metrics": metrics})
     return {
@@ -518,35 +569,38 @@ def _compute_report_inputs(ledger, run, metrics_path="reports/metrics.json", cov
     }
 
 
-def report_hashes(ledger, run, metrics_path="reports/metrics.json", coverage_path="coverage.json", rubric_path=None):
+def report_hashes(ledger, run, metrics_path="reports/metrics.json", coverage_path="coverage.json",
+                  rubric_path=None, subject_id=None):
     run = Path(run).resolve()
     with ledger.coordinator_lock(run):
         ledger.config(run)
-        computed = _compute_report_inputs(ledger, run, metrics_path, coverage_path, rubric_path)
+        computed = _compute_report_inputs(ledger, run, metrics_path, coverage_path, rubric_path, subject_id=subject_id)
         return {
             "data_hash": computed["data_hash"],
             "rubric_hash": computed["rubric_hash"],
             "rubric_path": computed["rubric_path"],
             "score_scale": computed["rubric"].get("scale"),
             "claims_count": len(computed["claims"]),
+            "subject_id": subject_id,
             "metrics_present": computed["metrics_present"],
             "coverage_present": computed["coverage_present"],
         }
 
 
 def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_path="reports/metrics.json",
-                      coverage_path="coverage.json", title=None, synthetic=False, rubric_path=None):
+                      coverage_path="coverage.json", title=None, synthetic=False, rubric_path=None, subject_id=None):
     import model_panel as panel
     run = Path(run).resolve()
     with ledger.coordinator_lock(run):
         cfg = ledger.config(run)
-        computed = _compute_report_inputs(ledger, run, metrics_path, coverage_path, rubric_path)
+        computed = _compute_report_inputs(ledger, run, metrics_path, coverage_path, rubric_path, subject_id=subject_id)
         metrics = computed["metrics"]
         coverage = computed["coverage"]
         claims = computed["claims"]
         rubric = computed["rubric"]
         data_hash = computed["data_hash"]
         sources_rows = ledger.read_jsonl(run / "sources.jsonl")
+        sources_by_id = {s["source_id"]: s for s in sources_rows if isinstance(s, dict) and s.get("source_id")}
         evidence_rows = ledger.read_jsonl(run / "evidence.jsonl")
         occurrences_rows = ledger.read_jsonl(run / "occurrences.jsonl") if (run / "occurrences.jsonl").exists() else []
         occ_by_id = {o["occurrence_id"]: o for o in occurrences_rows if isinstance(o, dict) and o.get("occurrence_id")}
@@ -596,6 +650,8 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 occ_details.append({
                     "occurrence_id": oid,
                     "source_id": occ.get("source_id"),
+                    "speaker": occ.get("speaker"),
+                    "endorsement": occ.get("endorsement"),
                     "original_quote": occ.get("original_quote") or "",
                     "locator": occ.get("locator"),
                     "timestamp": ts,
@@ -603,6 +659,7 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 if occ.get("source_id") in seen_sids and occ["source_id"] not in occ_source_ids:
                     occ_source_ids.append(occ["source_id"])
             first_quote = next((o["original_quote"] for o in occ_details if o["original_quote"]), None)
+            primary_speaker = next((o["speaker"] for o in occ_details if common.nonempty(o.get("speaker"))), None) or c.get("subject_id")
             timestamps = [o["timestamp"] for o in occ_details if o["timestamp"]]
             ts_summary = ", ".join(dict.fromkeys(timestamps))
             if is_resolved:
@@ -629,7 +686,25 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
             ev_ids = [eid for eid in c.get("evidence_ids", []) if eid in seen_sids]
             if not ev_ids:
                 ev_ids = occ_source_ids
+            lead_time_days = None
+            if c.get("claim_type") == "prediction":
+                stated_at = common.earliest_stated_at(c, occ_by_id, sources_by_id, cfg["scope"]["timezone"])
+                target_end = common.claim_target_deadline(c)
+                if stated_at and target_end:
+                    try:
+                        ok_lt, lt_val, _ = common.check_prediction_temporal_order(
+                            stated_at, target_end, common.claim_criteria_timezone(c, cfg["scope"]["timezone"])
+                        )
+                        if ok_lt:
+                            lead_time_days = lt_val
+                    except ValueError:
+                        lead_time_days = None
+            diff_tier = common.resolve_difficulty_tier(c)
             note_parts = [c["claim_id"], c.get("claim_type") or "claim"]
+            if diff_tier != "unrated":
+                note_parts.append(f"difficulty={diff_tier}")
+            if lead_time_days is not None:
+                note_parts.append(f"lead={lead_time_days:g}d")
             if c.get("reason"):
                 note_parts.append(f"reason={c['reason']}")
             if ts_summary:
@@ -639,12 +714,23 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 "title": c["text"][:80],
                 "claim": c["text"],
                 "claim_type": c.get("claim_type"),
+                "subject_id": c.get("subject_id"),
+                "speaker": primary_speaker,
+                "endorsement": c.get("endorsement"),
                 "lifecycle": lifecycle,
                 "status": status,
                 "assessment": assessment,
                 "evidence_ids": ev_ids,
                 "notes": " · ".join(note_parts),
             }
+            if diff_tier != "unrated":
+                case_obj["difficulty"] = diff_tier
+            if c.get("difficulty_score") is not None:
+                case_obj["difficulty_score"] = c["difficulty_score"]
+            if c.get("difficulty_rationale"):
+                case_obj["difficulty_rationale"] = c["difficulty_rationale"]
+            if lead_time_days is not None:
+                case_obj["lead_time_days"] = lead_time_days
             if first_quote:
                 case_obj["original_quote"] = first_quote
             if ts_summary:
@@ -676,12 +762,24 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                     splits.append(f"{ctype}: {tsr['value'] * 100:.1f}% ({tsr['numerator']}/{tsr['denominator']})")
             if splits:
                 summary_lines.append("Claim-type split — " + "; ".join(splits) + ".")
+            pdiff = metrics.get("prediction_difficulty") or {}
+            nt_sr = pdiff.get("non_trivial_strict_support_rate") or {}
+            if pdiff.get("rated_n") and nt_sr.get("denominator"):
+                summary_lines.append(
+                    f"Non-trivial prediction support rate: {nt_sr['value'] * 100:.1f}% ({nt_sr['numerator']}/{nt_sr['denominator']}; {pdiff['rated_n']} rated predictions)."
+                )
+            phor = metrics.get("prediction_horizon") or {}
+            if phor.get("dated_n") and phor.get("mean_lead_time_days") is not None:
+                summary_lines.append(
+                    f"Dated predictions ({phor['dated_n']}): mean lead time {phor['mean_lead_time_days']:.1f}d, median {phor['median_lead_time_days']:.1f}d."
+                )
+        report_subject = subject_id or cfg["subject"]
         payload = {
             "schema_version": 1, "synthetic": bool(synthetic), "data_hash": data_hash,
             "rubric": rubric,
             "report": {
-                "title": title or f"Claim Audit: {cfg['subject']}",
-                "subject": cfg["subject"],
+                "title": title or f"Claim Audit: {report_subject}",
+                "subject": report_subject,
                 "period_start": cfg["scope"]["start"], "period_end": cfg["scope"]["end"],
                 "as_of": cfg["scope"]["as_of"][:10], "generated_at": common.now()[:10],
                 "summary": summary_lines,

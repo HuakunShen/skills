@@ -1,0 +1,14 @@
+interface:
+  display_name: Claim & Credibility Audit
+  short_description: Batch-audit claims, forecasts, evidence and credibility
+  default_prompt: Use $audit-claims to scope this corpus, batch-extract viewpoints,
+    verify due claims, and produce an auditable credibility report.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

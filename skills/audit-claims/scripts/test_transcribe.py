@@ -153,6 +153,17 @@ class TranscriptionTests(unittest.TestCase):
         with self.assertRaises(stt.StopRun):
             self.estimate()
 
+    def test_path_traversal_rejected_and_bcp47_zh_hans_accepted(self):
+        outside = self.root.parent / "outside-secret.mp3"
+        outside.write_bytes(b"secret")
+        self.addCleanup(outside.unlink, missing_ok=True)
+        self.manifest.write_text(json.dumps({"id": "bad", "path": "../outside-secret.mp3", "duration_seconds": 10}) + "\n")
+        with self.assertRaisesRegex(stt.StopRun, "escapes"):
+            self.estimate()
+        self.manifest.write_text(json.dumps({"id": "zh", "path": "a.mp3", "duration_seconds": 30, "language": "zh-Hans"}) + "\n")
+        e = self.estimate()
+        self.assertEqual(e["plan"]["items"][0]["language"], ["zh-Hans"])
+
 
 if __name__ == "__main__":
     unittest.main()

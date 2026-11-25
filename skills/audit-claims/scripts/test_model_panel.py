@@ -198,6 +198,24 @@ class ModelPanelTests(unittest.TestCase):
         decision['user_approval_reference'] = 'actual-user-message-reference'
         self.assertTrue(panel.consensus(self.policy, votes, decision)['accepted'])
 
+    def test_numeric_normalization_and_judge_isolation_and_longitudinal_only(self):
+        # 10 vs 10.0 should agree cleanly rather than trigger spurious disagreement.
+        res = panel.consensus(self.policy, [self.vote('a', normalized_result={'value': 10}),
+                                            self.vote('b', normalized_result={'value': 10.0})])
+        self.assertTrue(res['accepted'])
+        # Judge cannot equal sole reviewer unless allow_self_judge=true.
+        self.policy['roles']['verify'] = ['a', 'b', 'c']
+        self.policy['verification'] = {'mode': 'judge', 'required_reviewers': ['c'], 'judge_model_id': 'c'}
+        with self.assertRaisesRegex(ValueError, 'sole required reviewer'):
+            panel.validate_policy(self.policy)
+        # Longitudinal-only policy allows empty lookup/extract/verify roles.
+        long_pol = copy.deepcopy(self.policy)
+        long_pol.pop('policy_hash', None)
+        long_pol['analysis_modules'] = ['longitudinal', 'qualitative']
+        long_pol['roles'] = {'lookup': [], 'extract': [], 'verify': [], 'report': ['a', 'b', 'c'], 'judge': []}
+        long_pol['verification'] = {'mode': 'human', 'required_reviewers': [], 'judge_model_id': None}
+        self.assertTrue(panel.validate_policy(long_pol)['valid'])
+
 
 if __name__ == '__main__':
     unittest.main()

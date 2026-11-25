@@ -255,6 +255,21 @@ class RenderReportTests(unittest.TestCase):
                 self.assertEqual(source.read_bytes(), original)
                 self.assertFalse(output.exists())
 
+    def test_null_fields_english_i18n_case_validation_and_dark_contrast(self):
+        data = copy.deepcopy(self.data)
+        data['coverage'] = None
+        data['costs'] = None
+        data['sources'][0]['published_at'] = None
+        page_en = renderer.render_report(data, lang='en')
+        self.assertIn('<html lang="en">', page_en)
+        self.assertIn('Date unknown', page_en)
+        self.assertNotIn('None ·', page_en)
+        self.assertIn('#F87171', page_en)
+        bad_case = copy.deepcopy(self.data)
+        del bad_case['cases'][0]['title']
+        with self.assertRaisesRegex(ValueError, 'case.title'):
+            renderer.validate_report(bad_case)
+
 
 if __name__ == '__main__':
     unittest.main()

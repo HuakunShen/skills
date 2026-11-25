@@ -56,15 +56,17 @@ worker 只写自己的任务结果文件，例如 `work/<task_id>/result.json` �
 返回 JSON/JSONL 数据文件路径、输入哈希、条数、覆盖说明和阻塞项，不输出最终分数。
 ```
 
-## B. 跨批次归并与规则冻结
+## B. 分桶跨批次归并与规则冻结
+
+> **规模提示（数千期视频 / 数万观点）**：不要把全语料所有提取结果一次塞入单个 LLM 上下文。先按 `subject_id + 标准化实体/主题标签 + 时间窗`（或离线 TF-IDF/embedding 近邻）分桶成每桶 ≤100 条的候选簇，逐桶运行本模板，最后再做跨桶边界合并。
 
 ```text
-任务：根据全部提取结果建立可审计的去重命题集合，并冻结核验规则。
+任务：对以下候选桶内的提取结果建立可审计的去重命题集合，并准备冻结规则定义 JSON。
 
-输入：{all_extraction_results_and_hashes}
-原文索引：{source_and_occurrence_index}
+输入桶：{bucket_extraction_results_and_hashes}
+原文索引：{bucket_source_and_occurrence_index}
 配置：{scope_time_and_method_config}
-输出：{unique_result_path}
+输出：{bucket_merged_result_path}
 
 先核对每个计划批次是否成功、每份素材是否覆盖；缺失批次保留明确状态。
 以说话者、目标、谓词、单位、范围、期限、条件、概率和语义作为等价判断依据。

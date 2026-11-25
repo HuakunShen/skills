@@ -183,6 +183,19 @@ class StorageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'manifest directory'):
             normalize_sources.normalize(record, inputs, self.run, ledger.config(self.run), 1000)
 
+    def test_import_jsonl_discovers_reviews_decisions_and_criteria(self):
+        self.init('sqlite')
+        ledger.write_jsonl(self.run / 'sources.jsonl', [{'source_id': 's'}])
+        ledger.write_jsonl(self.run / 'claims.jsonl', [{'claim_id': 'c'}])
+        (self.run / 'reviews/decisions').mkdir(parents=True)
+        (self.run / 'reviews/decisions/dec1.json').write_text(
+            json.dumps({'schema_version': 1, 'consensus': {'claim_id': 'c'}, 'adoption': {}}), encoding='utf-8')
+        (self.run / 'criteria').mkdir(parents=True)
+        (self.run / 'criteria/crit1.json').write_text(json.dumps({'version': '1', 'definition': {}}), encoding='utf-8')
+        res = self.import_rows()
+        self.assertEqual(res['imported_tables']['decisions'], 1)
+        self.assertEqual(res['imported_tables']['criteria_versions'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

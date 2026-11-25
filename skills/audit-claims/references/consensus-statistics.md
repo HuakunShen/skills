@@ -36,7 +36,7 @@
 | --- | --- |
 | `selected_models` | 明确选中的 `{id, provider, api_model, availability, cost}`；不填密钥 |
 | `roles` | `lookup`、`extract`、`verify`、`report`、`judge` 对应 model ID 数组 |
-| `verification.mode` | `single | unanimous | judge | human` |
+| `verification.mode` | `single | unanimous | judge | human | tiered` |
 | `verification.required_reviewers` | 本轮必须提交有效记录的指定核验员 |
 | `verification.judge_model_id` | judge 策略使用的指定模型；不需要时 null |
 | `verification.escalation` | `hold`（默认）或用户预先选定的 `human`；仅对符合条件的未决分歧升级 |
@@ -88,8 +88,11 @@
 | --- | --- | --- |
 | `single` | 指定的一个核验员提交有效、证据合格的结果 | 按普通复核流程处理；不宣称多模型共识 |
 | `unanimous` | 每个指定核验员都提交有效结果；所有规范化裁决相同；无弃权 | 保留冲突并暂停此条的最终验收，继续其他任务 |
-| `judge` | 指定核验员的记录齐备，指定 judge 读取证据并出具具名决定 | judge 可接受、修订或保留争议，必须说明证据理由 |
-| `human` | 指定核验员的记录齐备，用户对证据与分歧作出明确决定 | 记录人类决定；未回答之前继续保持未验收 |
+| `tiered` | 低风险条目先由初轮模型核验（配合随机抽检）；高风险、反驳或分歧条目升级至 `escalation_reviewers` / `judge` | 自动升级复核，不降低高风险项验收门槛 |
+| `judge` | 指定核验员的记录齐备，指定 judge 读取证据并出具具名决定（默认不得等于唯一 reviewer） | judge 可接受、修订或保留争议，必须说明证据理由 |
+| `human` | 指定核验员（可为空）的记录齐备，用户对证据与分歧作出明确决定 | 记录人类决定；未回答之前继续保持未验收 |
+
+若已采纳裁决事后遇到数据修订、新证据或归属更正，使用 `adopt_verdict.py reopen --run <RUN> --claim-id <ID> --reason <REASON> --actor <ACTOR>` 保留不可变历史并显式重开，禁止直接手工修改已采纳的 `claims.jsonl`。
 
 所有策略都检查指定核验员是否齐备。正常弃权是有效提交，但它不会帮助满足 unanimity；judge/human 可以在明确看到弃权与原因后作出决定。某个指定模型缺席时不得把剩余票伪装成全体一致，或自动切换到多数/仲裁模式。
 

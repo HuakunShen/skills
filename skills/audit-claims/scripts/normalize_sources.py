@@ -3,23 +3,25 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 from pathlib import Path
 import re
 import sys
 
+import _common as common
 import audit_run as ledger
 
-VERSION = 1
+VERSION = 2
 FORMATS = {"txt", "md", "srt", "vtt", "json"}
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 TIMING = re.compile(r"^\s*((?:\d+:)?\d{2}:\d{2}(?:[.,]\d{1,3})?)\s+-->\s+((?:\d+:)?\d{2}:\d{2}(?:[.,]\d{1,3})?)(?:\s+.*)?$")
+VTT_INLINE_TAG = re.compile(r"</?(?:c(?:\.[^>\s]+)?|\d{2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?|b|i|u|v(?:\s+[^>]*)?|lang(?:\s+[^>]*)?)>", re.IGNORECASE)
+SPOOFED_LOCATOR = re.compile(r"<!--\s*audit-claims-locator:|^\[#(?:p|cue)-\d{6}[^\]]*\]", re.MULTILINE)
 
 
 def sha(data):
-    return hashlib.sha256(data).hexdigest()
+    return common.digest(data) if isinstance(data, dict) else __import__("hashlib").sha256(data).hexdigest()
 
 
 def finite_number(value, label):
@@ -39,10 +41,33 @@ def seconds(value):
     return round(second + 60 * minute + (3600 * int(parts[0]) if len(parts) == 3 else 0), 6)
 
 
-def paragraphs(text):
-    """Keep original text, including original frontmatter; annotate original line ranges."""
+def sanitize_body_text(text):
+    cleaned, bidi_removed = common.strip_bidi_controls(text)
+    escaped = SPOOFED_LOCATOR.sub(lambda m: "[escaped-marker] " + m.group(0).lstrip("<!-#["), cleaned)
+    return escaped, bidi_removed
+
+
+def compact_marker(location):
+    lid = location["id"]
+    parts = [f"#{lid}"]
+    if "start_seconds" in location:
+        end = location.get("end_seconds")
+        span = f"{location['start_seconds']:.3f}".rstrip("0").rstrip(".")
+        if end is not None:
+            end_s = f"{end:.3f}".rstrip("0").rstrip(".")
+            span = f"{span}-{end_s}"
+        parts.append(span + "s")
+    if location.get("speaker"):
+        speaker = re.sub(r"[\]\s]+", "_", str(location["speaker"]).strip())
+        if speaker:
+            parts.append("@" + speaker)
+    return "[" + " ".join(parts) + "]\n"
+
+
+def paragraphs(text, locator_mode="compact"):
+    """Keep original text, including original frontmatter; emit compact tags + sidecar metadata."""
     lines = text.splitlines(keepends=True)
-    output, index, counter = [], 0, 0
+    output, locators, index, counter = [], [], 0, 0
     while index < len(lines):
         if not lines[index].strip():
             output.append(lines[index])
@@ -65,14 +90,15 @@ def paragraphs(text):
         counter += 1
         location = {"id": f"p-{counter:06d}", "kind": kind,
                     "original_line_start": start + 1, "original_line_end": index}
-        output.append(marker(location))
+        locators.append(location)
+        output.append(marker(location) if locator_mode == "inline" else compact_marker(location))
         original = "".join(lines[start:index])
         output.append(original)
         if not original.endswith("\n"):
             output.append("\n")
     if not counter:
         raise ValueError("Empty text source")
-    return "".join(output), "paragraph", counter
+    return "".join(output), "paragraph", counter, locators
 
 
 def marker(location):
@@ -80,17 +106,18 @@ def marker(location):
     return "<!-- audit-claims-locator: " + encoded + " -->\n"
 
 
-def cue_body(cues):
+def cue_body(cues, locator_mode="compact"):
     if not cues:
         raise ValueError("Transcript has no nonempty cues")
-    output = []
+    output, locators = [], []
     for index, cue in enumerate(cues, 1):
         location = {"id": f"cue-{index:06d}", "kind": "cue", **{key: value for key, value in cue.items() if key != "text"}}
-        output += [marker(location), cue["text"], "\n\n"]
-    return "".join(output), "cue", len(cues)
+        locators.append(location)
+        output += [marker(location) if locator_mode == "inline" else compact_marker(location), cue["text"], "\n\n"]
+    return "".join(output), "cue", len(cues), locators
 
 
-def subtitles(text, fmt):
+def subtitles(text, fmt, locator_mode="compact", clean_youtube_vtt=False):
     lines = text.split("\n")
     blocks, current, start = [], [], 0
     for index, line in enumerate(lines):
@@ -103,7 +130,7 @@ def subtitles(text, fmt):
             current = []
     if current:
         blocks.append((start, current))
-    cues = []
+    cues, skipped_empty = [], 0
     if fmt == "vtt" and (not blocks or not blocks[0][1][0].startswith("WEBVTT")):
         raise ValueError("VTT input must have WEBVTT header")
     for block_number, (line_start, block) in enumerate(blocks):
@@ -120,19 +147,28 @@ def subtitles(text, fmt):
             raise ValueError(f"Malformed {fmt.upper()} cue near original line {line_start}")
         match = TIMING.match(block[timing_index])
         cue_text = "\n".join(block[timing_index + 1:])
+        if clean_youtube_vtt:
+            cue_text = VTT_INLINE_TAG.sub("", cue_text).strip()
         if not cue_text.strip():
-            raise ValueError(f"Empty subtitle cue near original line {line_start}")
+            skipped_empty += 1
+            continue
         start_seconds, end_seconds = seconds(match.group(1)), seconds(match.group(2))
         if end_seconds < start_seconds:
             raise ValueError("Subtitle cue ends before it starts")
-        cues.append({"text": cue_text, "original_id": block[0] if timing_index else None,
-                     "original_line_start": line_start, "original_line_end": line_start + len(block) - 1,
-                     "start_seconds": start_seconds, "end_seconds": end_seconds})
-    return cue_body(cues)
+        entry = {"text": cue_text, "original_id": block[0] if timing_index else None,
+                 "original_line_start": line_start, "original_line_end": line_start + len(block) - 1,
+                 "start_seconds": start_seconds, "end_seconds": end_seconds}
+        if clean_youtube_vtt and cues and cues[-1]["text"] == cue_text and start_seconds <= cues[-1]["end_seconds"] + 1.0:
+            cues[-1]["end_seconds"] = max(cues[-1]["end_seconds"], end_seconds)
+            cues[-1].setdefault("collapsed_cue_lines", [cues[-1]["original_line_start"]]).append(line_start)
+            continue
+        cues.append(entry)
+    body, kind, count, locators = cue_body(cues, locator_mode=locator_mode)
+    return body, kind, count, locators, skipped_empty
 
 
-def json_transcript(text):
-    value = json.loads(text)
+def json_transcript(text, locator_mode="compact"):
+    value = common.strict_json(text)
     prefix = "$"
     if isinstance(value, dict) and "response" in value:
         value = value["response"]
@@ -145,24 +181,29 @@ def json_transcript(text):
         if value.get("segments") is not None and not isinstance(value["segments"], list):
             raise ValueError("Transcript segments must be an array")
         if "segments" in value and value["segments"]:
-            if not isinstance(value["segments"], list):
-                raise ValueError("Transcript segments must be an array")
             segments, prefix = value["segments"], prefix + ".segments"
         elif isinstance(full_text, str) and full_text.strip():
-            return paragraphs(full_text)
+            body, kind, count, locators = paragraphs(full_text, locator_mode=locator_mode)
+            return body, kind, count, locators, 0
         else:
             raise ValueError("Unrecognized/empty transcript JSON; expected text or segments")
     elif isinstance(value, list) and value:
         segments = value
     else:
         raise ValueError("Unrecognized/empty transcript JSON")
-    cues = []
+    cues, skipped_empty = [], 0
     for index, row in enumerate(segments):
-        if not isinstance(row, dict) or not isinstance(row.get("text"), str) or not row["text"].strip():
-            raise ValueError(f"Transcript segment {index} must contain nonempty text")
+        if not isinstance(row, dict) or not isinstance(row.get("text"), str):
+            raise ValueError(f"Transcript segment {index} must contain text")
+        if not row["text"].strip():
+            skipped_empty += 1
+            continue
         cue = {"text": row["text"], "original_json_path": f"{prefix}[{index}]"}
         if "id" in row:
             cue["original_id"] = row["id"]
+        speaker = row.get("speaker") or row.get("speaker_id") or row.get("speaker_label")
+        if isinstance(speaker, str) and speaker.strip():
+            cue["speaker"] = speaker.strip()
         start, end, duration = row.get("start"), row.get("end"), row.get("duration")
         if start is not None:
             cue["start_seconds"] = finite_number(start, "start")
@@ -181,12 +222,14 @@ def json_transcript(text):
         if "start_seconds" in cue and "end_seconds" in cue and cue["end_seconds"] < cue["start_seconds"]:
             raise ValueError("Transcript segment ends before it starts")
         cues.append(cue)
-    if full_text and " ".join(full_text.split()) != " ".join(" ".join(cue["text"] for cue in cues).split()):
+    # Compare ignoring all whitespace so CJK text without spaces between segments passes reliably.
+    if full_text and "".join(full_text.split()) != "".join("".join(cue["text"].split()) for cue in cues):
         raise ValueError("JSON text disagrees with segments; resolve alignment before normalization")
-    return cue_body(cues)
+    body, kind, count, locators = cue_body(cues, locator_mode=locator_mode)
+    return body, kind, count, locators, skipped_empty
 
 
-def normalize(record, manifest_dir, run, cfg, max_bytes):
+def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact", clean_youtube_vtt=False):
     sid = record.get("source_id")
     if not isinstance(sid, str) or not SAFE_ID.fullmatch(sid):
         raise ValueError("source_id must be 1-128 ASCII letters, digits, underscores or hyphens")
@@ -195,13 +238,15 @@ def normalize(record, manifest_dir, run, cfg, max_bytes):
         raise ValueError(f"Source {sid} needs a nonempty title")
     if "source_url" not in record or (url is not None and (not isinstance(url, str) or not url.strip())):
         raise ValueError(f"Source {sid} needs source_url (a string or null for local inputs)")
-    ledger.publication_day(published, ledger.ZoneInfo(cfg["scope"]["timezone"]))
+    if published is not None:
+        ledger.publication_day(published, ledger.ZoneInfo(cfg["scope"]["timezone"]))
     path_value = record.get("path")
     if not isinstance(path_value, str) or not path_value:
         raise ValueError(f"Source {sid} needs an input path relative to the manifest")
+    manifest_root = Path(manifest_dir).resolve()
     path = Path(path_value)
-    resolved = (manifest_dir / path).resolve()
-    if path.is_absolute() or not resolved.is_relative_to(manifest_dir):
+    resolved = (manifest_root / path).resolve()
+    if path.is_absolute() or not resolved.is_relative_to(manifest_root):
         raise ValueError(f"Source {sid} input path must remain under the manifest directory")
     if not resolved.is_file():
         raise ValueError(f"Source {sid} input file is missing")
@@ -218,6 +263,7 @@ def normalize(record, manifest_dir, run, cfg, max_bytes):
     text = data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
     if "\x00" in text or not text.strip():
         raise ValueError(f"Source {sid} is binary or empty")
+    text, bidi_removed = sanitize_body_text(text)
     language = record.get("language")
     method = record.get("transcript_method", "provided_text" if fmt in {"txt", "md"} else "provided_transcript")
     if language is not None and not (isinstance(language, str) or
@@ -225,25 +271,44 @@ def normalize(record, manifest_dir, run, cfg, max_bytes):
         raise ValueError(f"Source {sid} language must be a string, nonempty list of language strings, or null")
     if not isinstance(method, str) or not method:
         raise ValueError(f"Source {sid} transcript_method must be a nonempty string")
+    skipped_empty = 0
     if fmt in {"txt", "md"}:
-        body, locator_kind, locator_count = paragraphs(text)
+        body, locator_kind, locator_count, locators = paragraphs(text, locator_mode=locator_mode)
     elif fmt in {"srt", "vtt"}:
-        body, locator_kind, locator_count = subtitles(text, fmt)
+        body, locator_kind, locator_count, locators, skipped_empty = subtitles(
+            text, fmt, locator_mode=locator_mode, clean_youtube_vtt=clean_youtube_vtt)
     else:
-        body, locator_kind, locator_count = json_transcript(text)
+        body, locator_kind, locator_count, locators, skipped_empty = json_transcript(text, locator_mode=locator_mode)
+    speakers_observed = sorted({loc["speaker"] for loc in locators if loc.get("speaker")})
     metadata = {"source_id": sid, "title": title, "source_url": url, "published_at": published,
                 "language": language, "transcript_method": method, "format": fmt,
-                "raw_path": f"raw/{sid}.{fmt}", "raw_hash": sha(data), "normalization_version": VERSION}
+                "raw_path": f"raw/{sid}.{fmt}", "raw_hash": __import__("hashlib").sha256(data).hexdigest(),
+                "locator_mode": locator_mode, "normalization_version": VERSION}
+    if record.get("speakers") is not None:
+        metadata["speakers"] = record["speakers"]
+    if speakers_observed:
+        metadata["speakers_observed"] = speakers_observed
     fingerprint = ledger.digest(metadata)
     frontmatter = "---\n" + "".join(f"{key}: {json.dumps(value, ensure_ascii=False)}\n" for key, value in metadata.items()) + "---\n\n"
     normalized = (frontmatter + body).encode("utf-8")
-    row = {**metadata, "status": "ready", "content_path": f"sources/{sid}.md", "content_hash": sha(normalized),
-           "normalization_fingerprint": fingerprint, "locator_kind": locator_kind, "locator_count": locator_count}
+    sidecar = json.dumps({"schema_version": 1, "source_id": sid, "locator_kind": locator_kind,
+                          "locators": locators, "skipped_empty_cues": skipped_empty,
+                          "bidi_controls_stripped": bidi_removed},
+                         ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+    row = {**metadata, "status": "ready", "content_path": f"sources/{sid}.md",
+           "locators_path": f"sources/{sid}.locators.json",
+           "content_hash": __import__("hashlib").sha256(normalized).hexdigest(),
+           "normalization_fingerprint": fingerprint, "locator_kind": locator_kind,
+           "locator_count": locator_count, "skipped_empty_cues": skipped_empty,
+           "bidi_controls_stripped": bidi_removed, "_locators_bytes": sidecar}
     return row, data, normalized
 
 
 def ingest(args):
     run, manifest = Path(args.run).resolve(), Path(args.manifest).resolve()
+    locator_mode = getattr(args, "locator_mode", "compact")
+    clean_youtube_vtt = bool(getattr(args, "clean_youtube_vtt", False))
+    allow_append = bool(getattr(args, "append", False))
     if args.max_bytes <= 0 or args.max_batch_bytes <= 0:
         raise ValueError("Size limits must be positive")
     if not manifest.is_file() or manifest.stat().st_size > args.max_bytes:
@@ -257,8 +322,8 @@ def ingest(args):
         if not line.strip():
             continue
         try:
-            record = json.loads(line)
-        except json.JSONDecodeError as exc:
+            record = common.strict_json(line)
+        except (json.JSONDecodeError, ValueError) as exc:
             raise ValueError(f"Invalid manifest JSON at line {number}") from exc
         if not isinstance(record, dict):
             raise ValueError(f"Manifest line {number} must be an object")
@@ -272,7 +337,10 @@ def ingest(args):
         existing = ledger.unique(existing_rows, "source_id", "source inventory")
         prepared, total_bytes = [], 0
         for record in records:
-            row, raw, normalized = normalize(record, manifest.parent, run, cfg, args.max_bytes)
+            row, raw, normalized = normalize(
+                record, manifest.parent, run, cfg, args.max_bytes,
+                locator_mode=locator_mode, clean_youtube_vtt=clean_youtube_vtt)
+            locators_bytes = row.pop("_locators_bytes")
             total_bytes += len(raw) + len(normalized)
             if total_bytes > args.max_batch_bytes:
                 raise ValueError("Batch exceeds --max-batch-bytes; split the ingestion manifest")
@@ -287,26 +355,26 @@ def ingest(args):
                         raise ValueError(f"Immutable output differs for {sid}; use a new run")
                 elif unchanged:
                     raise ValueError(f"Ready source {sid} is missing an immutable output; recover it separately")
-            prepared.append((row, raw, normalized, unchanged))
-        changed = [item for item in prepared if not item[3]]
-        if changed and ((run / "plan.json").exists() or ledger.read_jsonl(run / "tasks.jsonl")):
-            raise ValueError("Corpus is already planned; do not add/change normalized sources in this run")
+            prepared.append((row, raw, normalized, locators_bytes, unchanged))
+        changed = [item for item in prepared if not item[4]]
+        has_plan = (run / "plan.json").exists() or bool(ledger.read_jsonl(run / "tasks.jsonl"))
+        if changed and has_plan and not allow_append:
+            raise ValueError("Corpus is already planned; pass --append to add new/pending sources or use a new run")
         if changed:
             merged = {row["source_id"]: dict(row) for row in existing_rows}
-            for row, raw, normalized, unchanged in prepared:
+            for row, raw, normalized, locators_bytes, unchanged in prepared:
                 if unchanged:
                     continue
-                for name, content in ((row["raw_path"], raw), (row["content_path"], normalized)):
+                for name, content in ((row["raw_path"], raw), (row["content_path"], normalized), (row["locators_path"], locators_bytes)):
                     target = ledger.inside(run, name)
                     if not target.exists():
-                        # Bytes are UTF-8, but raw BOM/newline bytes must remain exact.
-                        atomic_bytes(target, content)
+                        common.atomic_bytes(target, content)
                 previous = dict(merged.get(row["source_id"], {}))
                 previous.pop("estimated_tokens", None)
                 previous.pop("token_estimation", None)
                 merged[row["source_id"]] = {**previous, **row}
             ledger.write_jsonl(run / "sources.jsonl", list(merged.values()))
-            ledger.event(run, "sources_normalized", source_ids=[item[0]["source_id"] for item in changed])
+            ledger.event(run, "sources_normalized", source_ids=[item[0]["source_id"] for item in changed], append=allow_append)
             ledger.progress(run)
         return {"normalized": len(changed), "unchanged": len(prepared) - len(changed),
                 "source_ids": [item[0]["source_id"] for item in prepared],
@@ -315,19 +383,7 @@ def ingest(args):
 
 
 def atomic_bytes(path, data):
-    import os
-    import tempfile
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=".write-", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    common.atomic_bytes(path, data)
 
 
 def main(argv=None):
@@ -336,6 +392,9 @@ def main(argv=None):
     parser.add_argument("--run", required=True)
     parser.add_argument("--max-bytes", type=int, default=16 * 1024 * 1024, help="Maximum input/manifest bytes per file")
     parser.add_argument("--max-batch-bytes", type=int, default=256 * 1024 * 1024, help="Maximum combined raw/normalized bytes")
+    parser.add_argument("--locator-mode", choices=["compact", "inline"], default="compact")
+    parser.add_argument("--clean-youtube-vtt", action="store_true", help="Strip inline VTT tags and collapse rolling repeats")
+    parser.add_argument("--append", action="store_true", help="Allow adding new or previously pending sources after initial planning")
     args = parser.parse_args(argv)
     try:
         print(json.dumps(ingest(args), ensure_ascii=False, indent=2))

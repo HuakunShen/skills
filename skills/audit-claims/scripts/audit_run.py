@@ -4,131 +4,87 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from contextlib import contextmanager
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import hashlib
 import json
-import os
+import math
 from pathlib import Path
+import re
+import secrets
 import sys
-import tempfile
 from zoneinfo import ZoneInfo
+
+import _common as common
+import audit_pipeline as pipeline
 
 VERSION = 1
 TASK_STATES = {"pending", "running", "completed", "failed", "blocked"}
-SOURCE_STATES = {"ready", "pending", "failed", "skipped", "truncated"}
+SOURCE_STATES = {"ready", "pending", "failed", "skipped", "truncated", "segmented"}
+LOCATOR_LINE = re.compile(r"^(?:\[#(?:p|cue)-\d{6}[^\]]*\]|<!--\s*audit-claims-locator:\s*\{.*?\}\s*-->)\n?", re.MULTILINE)
 
 
 def canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return common.canonical(value)
 
 
 def digest(value):
-    return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
+    return common.digest(value)
 
 
 def now():
-    return datetime.now(timezone.utc).isoformat()
+    return common.now()
 
 
 def atomic_text(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp = tempfile.mkstemp(prefix=".write-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
-            stream.write(text)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temp, path)
-    finally:
-        if os.path.exists(temp):
-            os.unlink(temp)
+    common.atomic_text(path, text)
 
 
 def write_json(path, value):
-    atomic_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    common.write_json(path, value)
 
 
 def read_json(path):
-    with path.open(encoding="utf-8") as stream:
-        return json.load(stream)
+    return common.read_json(path)
 
 
 def read_jsonl(path):
-    if not path.exists():
-        return []
-    rows = []
-    with path.open(encoding="utf-8") as stream:
-        for line_number, line in enumerate(stream, 1):
-            if not line.strip():
-                continue
-            try:
-                value = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"{path.name}:{line_number}: invalid JSON") from exc
-            if not isinstance(value, dict):
-                raise ValueError(f"{path.name}:{line_number}: expected an object")
-            rows.append(value)
-    return rows
+    return common.read_jsonl(path)
 
 
 def write_jsonl(path, rows):
-    atomic_text(path, "".join(canonical(row) + "\n" for row in rows))
+    common.write_jsonl(path, rows)
 
 
 def inside(run, name):
-    if not isinstance(name, str) or not name:
-        raise ValueError("Missing run-relative file path")
-    relative = Path(name)
-    target = (run / relative).resolve()
-    if relative.is_absolute() or not target.is_relative_to(run.resolve()):
-        raise ValueError("Paths must remain inside the run directory")
-    return target
+    return common.inside(run, name)
 
 
-@contextmanager
 def coordinator_lock(run):
     """OS releases this advisory lock after crashes; no stale PID lock to delete."""
-    run.mkdir(parents=True, exist_ok=True)
-    handle = (run / ".coordinator.lock").open("a+b")
-    locked = False
-    try:
-        if os.name == "nt":
-            import msvcrt
-            handle.seek(0, 2)
-            if handle.tell() == 0:
-                handle.write(b"0")
-                handle.flush()
-            handle.seek(0)
-            try:
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError as exc:
-                raise ValueError("Another coordinator is writing this run") from exc
-        else:
-            import fcntl
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise ValueError("Another coordinator is writing this run") from exc
-        locked = True
-        yield
-    finally:
-        if locked:
-            if os.name == "nt":
-                import msvcrt
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(handle, fcntl.LOCK_UN)
-        handle.close()
+    return common.advisory_lock(run, ".coordinator.lock", "Another coordinator is writing this run")
+
+
+def _tail_event_sha(events_path):
+    if not events_path.exists():
+        return None
+    size = events_path.stat().st_size
+    if size == 0:
+        return None
+    with events_path.open("rb") as stream:
+        if size > 8192:
+            stream.seek(size - 8192)
+        lines = [line for line in stream.read().splitlines() if line.strip()]
+    return hashlib.sha256(lines[-1]).hexdigest() if lines else None
 
 
 def event(run, kind, **data):
-    with (run / "events.jsonl").open("a", encoding="utf-8") as stream:
-        stream.write(canonical({"at": now(), "event": kind, **data}) + "\n")
+    events_path = Path(run) / "events.jsonl"
+    prev_sha = _tail_event_sha(events_path)
+    payload = {"at": now(), "event": kind, "prev_sha256": prev_sha, **data}
+    with events_path.open("a", encoding="utf-8") as stream:
+        stream.write(canonical(payload) + "\n")
         stream.flush()
-        os.fsync(stream.fileno())
+        __import__("os").fsync(stream.fileno())
 
 
 def as_of_time(value, zone):
@@ -151,6 +107,20 @@ def publication_day(value, zone):
     return parsed.astimezone(zone).date()
 
 
+def estimate_source_tokens(text):
+    """Script-aware conservative token bound excluding frontmatter and locator tags."""
+    body = text
+    if body.startswith("---\n"):
+        end = body.find("\n---\n\n", 4)
+        if end != -1:
+            body = body[end + 6 :]
+    body = LOCATOR_LINE.sub("", body)
+    raw = body.encode("utf-8")
+    ascii_bytes = sum(1 for b in raw if b < 128)
+    non_ascii_bytes = len(raw) - ascii_bytes
+    return math.ceil(ascii_bytes / 4) + non_ascii_bytes + 128
+
+
 def config_body(config):
     return {"schema_version": config["schema_version"], "subject": config["subject"],
             "scope": config["scope"], "cutoff_mode": config.get("cutoff_mode", "retrospective"),
@@ -158,7 +128,7 @@ def config_body(config):
 
 
 def config(run):
-    result = read_json(run / "run.json")
+    result = read_json(Path(run) / "run.json")
     if result.get("schema_version") != VERSION or result.get("config_hash") != digest(config_body(result)):
         raise ValueError("run.json scope/config changed or schema unsupported; create a new run")
     return result
@@ -174,7 +144,7 @@ def unique(rows, key, label):
 
 
 def inventory(run, cfg):
-    rows = read_jsonl(run / "sources.jsonl")
+    rows = read_jsonl(Path(run) / "sources.jsonl")
     unique(rows, "source_id", "sources")
     zone = ZoneInfo(cfg["scope"]["timezone"])
     start, end = date.fromisoformat(cfg["scope"]["start"]), date.fromisoformat(cfg["scope"]["end"])
@@ -213,16 +183,15 @@ def inventory(run, cfg):
                     raise ValueError(f"Content hash mismatch for source {sid}")
                 estimate = row.get("estimated_tokens")
                 if estimate is None:
-                    # UTF-8 byte count is intentionally conservative for CJK/mixed text.
-                    estimate = len(data) + 128
-                    method = "utf8_bytes_plus_128"
+                    estimate = estimate_source_tokens(text)
+                    method = "script_aware_tokens_plus_128"
                 elif isinstance(estimate, bool) or not isinstance(estimate, int) or estimate <= 0:
                     raise ValueError(f"estimated_tokens must be a positive integer for {sid}")
                 else:
                     estimate += 128
                     method = "provided_plus_128"
                 row.update(content_hash=actual_hash, estimated_tokens=estimate, token_estimation=method)
-            except (OSError, UnicodeDecodeError) as exc:
+            except (OSError, UnicodeDecodeError):
                 reason = "missing_or_unreadable_content"
             except ValueError as exc:
                 if "hash mismatch" in str(exc) or "estimated_tokens" in str(exc):
@@ -237,6 +206,7 @@ def inventory(run, cfg):
 
 
 def summary(run):
+    run = Path(run)
     cfg = config(run)
     sources = read_jsonl(run / "sources.jsonl")
     tasks = read_jsonl(run / "tasks.jsonl")
@@ -250,6 +220,7 @@ def summary(run):
 
 
 def progress(run):
+    run = Path(run)
     data = summary(run)
     lines = ["# Claim audit progress", "", f"Updated: {now()}", "", f"Run: `{data['run_id']}`",
              f"Publication range: {data['scope']['start']} through {data['scope']['end']} (inclusive, {data['scope']['timezone']})",
@@ -275,6 +246,9 @@ def init(args):
     as_of = as_of_time(args.as_of, zone)
     if start > end or end > as_of.date():
         raise ValueError("Require start <= end <= the local as-of date")
+    if not getattr(args, "allow_future_as_of", False):
+        if as_of.astimezone(timezone.utc) > datetime.now(timezone.utc) + timedelta(hours=14):
+            raise ValueError("--as-of cannot be in the future without --allow-future-as-of")
     body = {"schema_version": VERSION, "subject": args.subject,
             "scope": {"start": str(start), "end": str(end), "timezone": args.timezone,
                       "as_of": as_of.astimezone(timezone.utc).isoformat()},
@@ -285,12 +259,13 @@ def init(args):
             if cfg["config_hash"] != digest(body):
                 raise ValueError("Run already exists with another scope; create a different directory")
         else:
-            cfg = {**body, "run_id": "run_" + digest(body)[:16], "config_hash": digest(body), "created_at": now(),
+            cfg = {**body, "run_id": f"run_{digest(body)[:12]}_{secrets.token_hex(3)}",
+                   "config_hash": digest(body), "created_at": now(),
                    "execution": {"mode": "auto", "max_workers": 4}}
             write_json(run / "run.json", cfg)
-        for directory in ("sources", "work/batches", "work/results", "reports"):
+        for directory in ("sources", "work/batches", "work/results", "reports", "criteria", "history/claims", "reviews/facts", "reviews/decisions", "reviews/reports"):
             (run / directory).mkdir(parents=True, exist_ok=True)
-        for name in ("sources.jsonl", "tasks.jsonl", "claims.jsonl", "evidence.jsonl", "events.jsonl"):
+        for name in ("sources.jsonl", "tasks.jsonl", "claims.jsonl", "occurrences.jsonl", "evidence.jsonl", "events.jsonl"):
             if not (run / name).exists():
                 atomic_text(run / name, "")
         event(run, "initialized", config_hash=cfg["config_hash"])
@@ -298,10 +273,28 @@ def init(args):
     return summary(run)
 
 
+def _build_batches(rows, token_budget, max_items):
+    batches, current, tokens, oversized = [], [], 0, []
+    for row in rows:
+        count = row["estimated_tokens"]
+        if count > token_budget:
+            oversized.append({"source_id": row["source_id"], "estimated_tokens": count, "reason": "needs_segmentation"})
+            continue
+        if current and (len(current) >= max_items or tokens + count > token_budget):
+            batches.append(current)
+            current, tokens = [], 0
+        current.append(row)
+        tokens += count
+    if current:
+        batches.append(current)
+    return batches, oversized
+
+
 def plan_batches(args):
     if args.token_budget <= 128 or args.max_items <= 0:
         raise ValueError("Use positive --max-items and --token-budget greater than 128")
     run = Path(args.run).resolve()
+    append_mode = bool(getattr(args, "append", False))
     with coordinator_lock(run):
         cfg = config(run)
         selected, excluded, fingerprint = inventory(run, cfg)
@@ -309,24 +302,32 @@ def plan_batches(args):
             raise ValueError("Source inventory is empty; inventory and acquire the corpus before planning")
         parameters = {"input_token_budget": args.token_budget, "max_items": args.max_items}
         old_plan = read_json(run / "plan.json") if (run / "plan.json").exists() else None
-        if old_plan and (old_plan["corpus_fingerprint"] != fingerprint or old_plan["parameters"] != parameters):
-            raise ValueError("Corpus or batching parameters changed; preserve this run and initialize a new run")
-        batches, current, tokens, oversized = [], [], 0, []
-        for row in selected:
-            count = row["estimated_tokens"]
-            if count > args.token_budget:
-                oversized.append({"source_id": row["source_id"], "estimated_tokens": count, "reason": "needs_segmentation"})
-                continue
-            if current and (len(current) >= args.max_items or tokens + count > args.token_budget):
-                batches.append(current)
-                current, tokens = [], 0
-            current.append(row)
-            tokens += count
-        if current:
-            batches.append(current)
+        if old_plan and not append_mode and (old_plan["corpus_fingerprint"] != fingerprint or old_plan["parameters"] != parameters):
+            raise ValueError("Corpus or batching parameters changed; pass --append for new sources or initialize a new run")
         tasks = read_jsonl(run / "tasks.jsonl")
         existing = unique(tasks, "task_id", "tasks")
-        planned_ids = []
+        if append_mode and old_plan:
+            if old_plan["parameters"] != parameters:
+                raise ValueError("Batching parameters cannot change during --append")
+            # Preserve existing planned extract tasks and verify their input payloads remain unchanged.
+            already_planned_sids = set()
+            planned_ids = list(old_plan["task_ids"])
+            for tid in planned_ids:
+                if tid not in existing:
+                    raise ValueError(f"Missing planned task during --append: {tid}")
+                check_payload(run, cfg, existing[tid])
+                already_planned_sids.update(existing[tid].get("source_ids", []))
+            remaining = [row for row in selected if row["source_id"] not in already_planned_sids]
+            batches, oversized = _build_batches(remaining, args.token_budget, args.max_items)
+            # Retain still-unsegmented oversized items from prior plan if still in selected.
+            selected_ids = {r["source_id"] for r in selected}
+            prior_oversized = [o for o in old_plan.get("needs_segmentation", []) if o["source_id"] in selected_ids and o["source_id"] not in already_planned_sids]
+            oversized = list({o["source_id"]: o for o in prior_oversized + oversized}.values())
+            batched_total = len(already_planned_sids) + sum(len(b) for b in batches)
+        else:
+            batches, oversized = _build_batches(selected, args.token_budget, args.max_items)
+            planned_ids = []
+            batched_total = sum(len(b) for b in batches)
         for batch in batches:
             input_fp = digest({"config_hash": cfg["config_hash"], "stage": "extract", "sources": batch})
             tid = "extract_" + input_fp[:20]
@@ -346,28 +347,30 @@ def plan_batches(args):
                         "input_fingerprint": input_fp,
                         "payload_hash": hashlib.sha256(payload_path.read_bytes()).hexdigest()}
                 tasks.append(task)
+                existing[tid] = task
             elif existing[tid].get("input_fingerprint") != input_fp:
                 raise ValueError(f"Existing task input changed: {tid}")
-        stale_extractions = [row["task_id"] for row in tasks if row.get("stage") == "extract" and row["task_id"] not in planned_ids]
-        if stale_extractions:
-            raise ValueError("Existing extraction tasks do not match this corpus; create a new run")
+        if not append_mode:
+            stale_extractions = [row["task_id"] for row in tasks if row.get("stage") == "extract" and row["task_id"] not in planned_ids]
+            if stale_extractions:
+                raise ValueError("Existing extraction tasks do not match this corpus; create a new run")
         plan = {"schema_version": VERSION, "corpus_fingerprint": fingerprint, "parameters": parameters,
                 "inventory_sources": len(selected) + len(excluded),
                 "in_scope_sources": len(selected) + sum(row["reason"] not in {"outside_publication_range", "unknown_publication_date", "after_as_of", "publication_time_unknown_at_cutoff"} for row in excluded),
-                "eligible_sources": len(selected), "batched_sources": sum(len(batch) for batch in batches),
+                "eligible_sources": len(selected), "batched_sources": batched_total,
                 "excluded": excluded, "needs_segmentation": oversized, "task_ids": planned_ids}
         write_jsonl(run / "tasks.jsonl", tasks)
         write_json(run / "plan.json", plan)
         if old_plan != plan:
-            event(run, "batches_planned", task_count=len(planned_ids), corpus_fingerprint=fingerprint)
+            event(run, "batches_planned", task_count=len(planned_ids), corpus_fingerprint=fingerprint, append=append_mode)
         progress(run)
     return summary(run)
 
 
 def check_plan_tasks(run, tasks):
-    if not (run / "plan.json").exists():
+    if not (Path(run) / "plan.json").exists():
         return
-    planned = read_json(run / "plan.json")["task_ids"]
+    planned = read_json(Path(run) / "plan.json")["task_ids"]
     actual = [task["task_id"] for task in tasks if task.get("stage") == "extract"]
     if len(planned) != len(set(planned)) or set(actual) != set(planned) or len(actual) != len(planned):
         raise ValueError("Extraction tasks do not match immutable plan.task_ids")
@@ -380,7 +383,7 @@ def check_payload(run, cfg, task):
         raise ValueError(f"Non-extraction task needs immutable payload_hash: {task['task_id']}")
     if payload_hash is not None and hashlib.sha256(payload_bytes).hexdigest() != payload_hash:
         raise ValueError(f"Payload hash changed: {task['task_id']}")
-    payload = json.loads(payload_bytes)
+    payload = common.strict_json(payload_bytes.decode("utf-8"))
     if payload.get("task_id") != task["task_id"] or payload.get("input_fingerprint") != task.get("input_fingerprint"):
         raise ValueError(f"Payload identity mismatch: {task['task_id']}")
     if task.get("stage") == "extract":
@@ -399,7 +402,7 @@ def check_payload(run, cfg, task):
 def check_result(run, task, result_name):
     path = inside(run, result_name)
     data = path.read_bytes()
-    value = json.loads(data)
+    value = common.strict_json(data.decode("utf-8"))
     if not isinstance(value, dict) or value.get("complete") is not True:
         raise ValueError("Result must be a complete JSON object with complete=true")
     if value.get("task_id") != task["task_id"] or value.get("input_fingerprint") != task.get("input_fingerprint"):
@@ -418,10 +421,6 @@ def checkpoint(args):
     run = Path(args.run).resolve()
     with coordinator_lock(run):
         cfg = config(run)
-        if (run / "plan.json").exists():
-            _, _, fingerprint = inventory(run, cfg)
-            if fingerprint != read_json(run / "plan.json")["corpus_fingerprint"]:
-                raise ValueError("Corpus changed since planning; do not reuse this checkpoint")
         tasks = read_jsonl(run / "tasks.jsonl")
         by_id = unique(tasks, "task_id", "tasks")
         check_plan_tasks(run, tasks)
@@ -431,6 +430,8 @@ def checkpoint(args):
         before = task["status"]
         if before == "completed" and args.status != "completed":
             raise ValueError("Completed tasks are immutable; create new tasks/runs for revisions")
+        if before in {"failed", "blocked"} and args.status == "completed":
+            raise ValueError("Transition failed/blocked task to pending or running before completing")
         if args.status in {"running", "completed"}:
             for dependency in task.get("dependencies", []):
                 if dependency not in by_id or by_id[dependency]["status"] != "completed":
@@ -442,6 +443,8 @@ def checkpoint(args):
             if before == "completed" and result_hash != task.get("result_hash"):
                 raise ValueError("Completed result changed; preserve old result and create a revision task")
             task.update(result_path=result_name, result_hash=result_hash)
+            if task.get("attempts", 0) == 0:
+                task["attempts"] = 1
         if args.status == "running" and before != "running":
             task["attempts"] = task.get("attempts", 0) + 1
         task["status"] = args.status
@@ -456,6 +459,7 @@ def checkpoint(args):
 
 
 def validate(run):
+    run = Path(run)
     cfg = config(run)
     selected, excluded, fingerprint = inventory(run, cfg)
     tasks = read_jsonl(run / "tasks.jsonl")
@@ -489,12 +493,26 @@ def validate(run):
         if task["status"] == "completed":
             if check_result(run, task, task.get("result_path")) != task.get("result_hash"):
                 raise ValueError(f"Completed result changed: {task['task_id']}")
+    source_ids = {row["source_id"] for row in read_jsonl(run / "sources.jsonl")}
+    occurrences = read_jsonl(run / "occurrences.jsonl") if (run / "occurrences.jsonl").exists() else []
+    occ_ids = set(unique(occurrences, "occurrence_id", "occurrences"))
+    for occ in occurrences:
+        if occ.get("source_id") not in source_ids:
+            raise ValueError(f"Occurrence refers to a missing source: {occ['occurrence_id']}")
     claims = read_jsonl(run / "claims.jsonl")
     unique(claims, "claim_id", "claims")
-    source_ids = {row["source_id"] for row in read_jsonl(run / "sources.jsonl")}
+    evidence_ids = {row["evidence_id"] for row in read_jsonl(run / "evidence.jsonl")} if (run / "evidence.jsonl").exists() else set()
     for claim in claims:
         if "source_id" in claim and claim["source_id"] not in source_ids:
             raise ValueError(f"Claim refers to a missing source: {claim['claim_id']}")
+        if occ_ids:
+            for oid in claim.get("occurrence_ids", []):
+                if oid not in occ_ids:
+                    raise ValueError(f"Claim {claim['claim_id']} refers to missing occurrence: {oid}")
+        if evidence_ids:
+            for eid in claim.get("evidence_ids", []):
+                if eid not in evidence_ids:
+                    raise ValueError(f"Claim {claim['claim_id']} refers to missing evidence: {eid}")
     if excluded:
         warnings.append(f"{len(excluded)} sources are excluded or unavailable; see plan.json")
     if any(task["status"] != "completed" for task in tasks):
@@ -514,10 +532,12 @@ def parser():
     create.add_argument("--as-of", required=True)
     create.add_argument("--timezone", default="UTC")
     create.add_argument("--cutoff-mode", choices=["retrospective", "knowledge_as_of"], default="retrospective")
-    batches = commands.add_parser("plan-batches", help="Batch the fully acquired corpus, never silently truncate")
+    create.add_argument("--allow-future-as-of", action="store_true")
+    batches = commands.add_parser("plan-batches", help="Batch the acquired corpus without truncation")
     batches.add_argument("--run", required=True)
     batches.add_argument("--token-budget", type=int, default=40000, help="Usable INPUT tokens after context/output reserves")
     batches.add_argument("--max-items", type=int, default=10)
+    batches.add_argument("--append", action="store_true", help="Plan batches only for newly ready sources without invalidating existing tasks")
     check = commands.add_parser("checkpoint", help="Coordinator-only durable task update")
     check.add_argument("--run", required=True)
     check.add_argument("--task-id", required=True)
@@ -527,6 +547,49 @@ def parser():
     for name in ("status", "validate"):
         command = commands.add_parser(name)
         command.add_argument("--run", required=True)
+    seg = commands.add_parser("segment", help="Deterministically segment an oversized source at unit boundaries")
+    seg.add_argument("--run", required=True)
+    seg.add_argument("--source-id", required=True)
+    seg.add_argument("--token-budget", type=int, default=40000)
+    seg.add_argument("--overlap-units", type=int, default=2)
+    bind = commands.add_parser("bind-policy", help="Bind frozen model policy/rules into run.json and recompute config_hash")
+    bind.add_argument("--run", required=True)
+    bind.add_argument("--model-policy", default="config/model-policy.json")
+    bind.add_argument("--rules-json")
+    bind.add_argument("--allow-rebind", action="store_true")
+    bind.add_argument("--reason")
+    freeze = commands.add_parser("freeze-criteria", help="Freeze operational criteria snapshot with server timestamp and hash")
+    freeze.add_argument("--run", required=True)
+    freeze.add_argument("--claim-id", required=True)
+    freeze.add_argument("--definition", required=True)
+    freeze.add_argument("--version", default="1")
+    merge = commands.add_parser("merge-extraction", help="Merge completed extraction shards and verify quotes against sources")
+    merge.add_argument("--run", required=True)
+    merge.add_argument("--results", nargs="*")
+    merge.add_argument("--strict-quotes", action="store_true")
+    cov = commands.add_parser("coverage", help="Compute coverage.json deterministically from ledger records")
+    cov.add_argument("--run", required=True)
+    cov.add_argument("--out", default="coverage.json")
+    cov.add_argument("--inventory-incomplete", action="store_true")
+    assess = commands.add_parser("assess", help="Start a new assessment round with an updated as-of timestamp")
+    assess.add_argument("--run", required=True)
+    assess.add_argument("--as-of", required=True)
+    assess.add_argument("--reason", default="scheduled_reassessment")
+    rep = commands.add_parser("build-report-data", help="Assemble reports/report-data.json from run artifacts")
+    rep.add_argument("--run", required=True)
+    rep.add_argument("--out", default="reports/report-data.json")
+    rep.add_argument("--metrics", default="reports/metrics.json")
+    rep.add_argument("--coverage", default="coverage.json")
+    rep.add_argument("--title")
+    rep.add_argument("--synthetic", action="store_true")
+    hexp = commands.add_parser("handoff-export", help="Export a self-contained external AI handoff packet")
+    hexp.add_argument("--run", required=True)
+    hexp.add_argument("--task-ids", nargs="+", required=True)
+    hexp.add_argument("--packet-id")
+    himp = commands.add_parser("handoff-import", help="Verify and import an external AI handoff result")
+    himp.add_argument("--run", required=True)
+    himp.add_argument("--packet-id", required=True)
+    himp.add_argument("--result-file", required=True)
     return result
 
 
@@ -539,6 +602,24 @@ def main(argv=None):
             output = plan_batches(args)
         elif args.command == "checkpoint":
             output = checkpoint(args)
+        elif args.command == "segment":
+            output = pipeline.segment_source(sys.modules[__name__], args.run, args.source_id, args.token_budget, args.overlap_units)
+        elif args.command == "bind-policy":
+            output = pipeline.bind_policy(sys.modules[__name__], args.run, args.model_policy, args.rules_json, args.allow_rebind, args.reason)
+        elif args.command == "freeze-criteria":
+            output = pipeline.freeze_criteria(sys.modules[__name__], args.run, args.claim_id, args.definition, args.version)
+        elif args.command == "merge-extraction":
+            output = pipeline.merge_extraction(sys.modules[__name__], args.run, args.results, args.strict_quotes)
+        elif args.command == "coverage":
+            output = pipeline.compute_coverage(sys.modules[__name__], args.run, args.out, not args.inventory_incomplete)
+        elif args.command == "assess":
+            output = pipeline.new_assessment_round(sys.modules[__name__], args.run, args.as_of, args.reason)
+        elif args.command == "build-report-data":
+            output = pipeline.build_report_data(sys.modules[__name__], args.run, args.out, args.metrics, args.coverage, args.title, args.synthetic)
+        elif args.command == "handoff-export":
+            output = pipeline.handoff_export(sys.modules[__name__], args.run, args.task_ids, args.packet_id)
+        elif args.command == "handoff-import":
+            output = pipeline.handoff_import(sys.modules[__name__], args.run, args.packet_id, args.result_file)
         else:
             run = Path(args.run).resolve()
             with coordinator_lock(run):

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Compute transparent descriptive audit metrics. No model or network calls."""
+from __future__ import annotations
+
 import argparse
 import csv
 from datetime import datetime
@@ -7,11 +9,11 @@ import hashlib
 import io
 import json
 import math
-import os
 from pathlib import Path
+import random
 import statistics
-import tempfile
 
+import _common as common
 
 POLICY = {
     "minimum_categorical_sample": 30,
@@ -27,17 +29,15 @@ KINDS = {"factual", "prediction", "causal", "recommendation", "value_judgment",
          "preference", "hypothetical", "rhetorical", "reported", "ambiguous"}
 LIFECYCLES = {"pending", "ready", "awaiting_evidence", "resolved", "unscorable", "disputed"}
 OUTCOMES = {"supported", "contradicted", "mixed", "indeterminate", None}
+Z_95 = 1.959963984540054
 
 
 def canonical(obj):
-    return json.dumps(obj, ensure_ascii=False, sort_keys=True,
-                      separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return common.canonical(obj).encode("utf-8")
 
 
 def strict_json(text):
-    def bad(value):
-        raise ValueError("Non-finite JSON constant: " + value)
-    return json.loads(text, parse_constant=bad)
+    return common.strict_json(text)
 
 
 def load_rows(path, key):
@@ -56,7 +56,23 @@ def load_rows(path, key):
 
 
 def finite_number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    return common.finite_number(value)
+
+
+def wilson_ci(n, d, z=Z_95):
+    if d <= 0:
+        return None
+    p = n / d
+    denom = 1 + (z * z) / d
+    center = (p + (z * z) / (2 * d)) / denom
+    half = (z * math.sqrt((p * (1 - p) + (z * z) / (4 * d)) / d)) / denom
+    return {
+        "low": max(0.0, round(center - half, 6)),
+        "high": min(1.0, round(center + half, 6)),
+        "level": 0.95,
+        "small_sample": d < 10,
+        "method": "wilson_score_exchangeable_claims_no_adjudication_error",
+    }
 
 
 def validate_claim(c):
@@ -111,6 +127,7 @@ def validate_claim(c):
     if c["event_occurred"] is not None and type(c["event_occurred"]) is not bool:
         raise ValueError(f"{cid}: event_occurred must be boolean or null")
     criteria = c["criteria"]
+    frozen = None
     if criteria is not None:
         if not isinstance(criteria, dict) or not isinstance(criteria.get("definition"), dict):
             raise ValueError(f"{cid}: invalid criteria")
@@ -137,18 +154,19 @@ def validate_claim(c):
     if c["lifecycle"] != "resolved" and c["outcome"] is not None:
         raise ValueError(f"{cid}: unresolved current verdict must be null; retain old verdict in history")
     if c["lifecycle"] == "resolved":
-        if not c["due_for_assessment"] or criteria is None or not c["evidence_ids"]:
+        is_indet = c["outcome"] == "indeterminate"
+        if not c["due_for_assessment"] or criteria is None or (not c["evidence_ids"] and not is_indet):
             raise ValueError(f"{cid}: resolved claim requires due status, criteria and evidence")
         if not c.get("resolved_at"):
             raise ValueError(f"{cid}: resolved_at required")
         resolved = datetime.fromisoformat(c["resolved_at"].replace("Z", "+00:00"))
-        if resolved.tzinfo is None or resolved < frozen:
+        if resolved.tzinfo is None or (frozen is not None and resolved < frozen):
             raise ValueError(f"{cid}: resolution must have timezone and follow criteria freeze")
         if c["evaluation_mode"] == "categorical" and c["outcome"] is None:
             raise ValueError(f"{cid}: categorical verdict missing")
-        if c["evaluation_mode"] == "probabilistic" and type(c["event_occurred"]) is not bool:
+        if c["evaluation_mode"] == "probabilistic" and type(c["event_occurred"]) is not bool and not is_indet:
             raise ValueError(f"{cid}: resolved probability requires event outcome")
-        if c["evaluation_mode"] == "none":
+        if c["evaluation_mode"] == "none" and not is_indet:
             raise ValueError(f"{cid}: cannot resolve evaluation_mode=none")
     quality = c["evidence_quality"]
     if quality is not None:
@@ -158,8 +176,11 @@ def validate_claim(c):
             raise ValueError(f"{cid}: evidence_quality requires three scores from 0,0.5,1")
 
 
-def ratio(n, d):
-    return {"value": n / d if d else None, "numerator": n, "denominator": d}
+def ratio(n, d, with_ci=False):
+    res = {"value": n / d if d else None, "numerator": n, "denominator": d}
+    if with_ci:
+        res["ci_95"] = wilson_ci(n, d) if d else None
+    return res
 
 
 def quality_allows_verdict(c):
@@ -172,40 +193,147 @@ def quality_allows_verdict(c):
     return isinstance(exception, dict) and exception.get("reviewed") is True and bool(str(exception.get("reason", "")).strip())
 
 
-def core_metrics(claims):
+def _calibration_bins(probability_claims, num_bins):
+    bins = [{"bin_low": i / num_bins, "bin_high": (i + 1) / num_bins, "n": 0, "mean_pred": None, "observed_rate": None}
+            for i in range(num_bins)]
+    grouped = [[] for _ in range(num_bins)]
+    for c in probability_claims:
+        p = c["probability"]
+        idx = min(num_bins - 1, int(p * num_bins))
+        grouped[idx].append((p, int(c["event_occurred"])))
+    for i, pairs in enumerate(grouped):
+        if pairs:
+            bins[i]["n"] = len(pairs)
+            bins[i]["mean_pred"] = sum(p for p, _ in pairs) / len(pairs)
+            bins[i]["observed_rate"] = sum(y for _, y in pairs) / len(pairs)
+    return bins
+
+
+def _family_stats(categorical_claims, bootstrap=False, seed=2026):
+    if not categorical_claims:
+        return {"family_count": 0, "max_family_share": None, "effective_n": 0.0,
+                "family_weighted_strict_support_rate": None, "family_vs_claim_divergence": None,
+                "bootstrap_95_ci": None}
+    families = {}
+    for c in categorical_claims:
+        fid = c.get("family_id") or c["claim_id"]
+        families.setdefault(fid, []).append(c)
+    f_count = len(families)
+    max_share = max(len(v) for v in families.values()) / len(categorical_claims)
+    weights = [1.0 / len(families[c.get("family_id") or c["claim_id"]]) for c in categorical_claims]
+    w_sum = sum(weights)
+    eff_n = (w_sum * w_sum) / sum(w * w for w in weights)
+    fam_scores = [sum(1 for c in group if c["outcome"] == "supported") / len(group) for group in families.values()]
+    fam_rate = sum(fam_scores) / f_count
+    claim_rate = sum(1 for c in categorical_claims if c["outcome"] == "supported") / len(categorical_claims)
+    boot_ci = None
+    if bootstrap and f_count >= 5:
+        rng = random.Random(seed)
+        draws = []
+        for _ in range(1000):
+            sample = rng.choices(fam_scores, k=f_count)
+            draws.append(sum(sample) / f_count)
+        draws.sort()
+        boot_ci = {"low": round(draws[25], 6), "high": round(draws[975], 6), "level": 0.95,
+                   "method": "cluster_bootstrap_by_family_id", "seed": seed, "clusters": f_count}
+    return {
+        "family_count": f_count,
+        "max_family_share": round(max_share, 6),
+        "effective_n": round(eff_n, 4),
+        "family_weighted_strict_support_rate": fam_rate,
+        "family_vs_claim_divergence": round(abs(claim_rate - fam_rate), 6),
+        "bootstrap_95_ci": boot_ci,
+    }
+
+
+def core_metrics(claims, *, bootstrap_clusters=False):
     eligible = [c for c in claims if c["empirical"] and c["endorsement"] == "endorsed"
                 and c["attribution_confidence"] == "high"]
-    due = [c for c in eligible if c["accountability_eligible"] and c["due_for_assessment"]]
+    # Exclude exploratory inferred-probability claims from the due denominator so they don't depress coverage.
+    due = [c for c in eligible if c["accountability_eligible"] and c["due_for_assessment"]
+           and not (c["evaluation_mode"] == "probabilistic" and c["probability_origin"] != "explicit")]
     resolved = [c for c in due if c["lifecycle"] == "resolved" and c["review_state"] == "accepted"
                 and quality_allows_verdict(c)]
     categorical = [c for c in resolved if c["evaluation_mode"] == "categorical"
                    and c["outcome"] in {"supported", "contradicted", "mixed"}]
     probability = [c for c in resolved if c["evaluation_mode"] == "probabilistic"
-                   and c["probability_origin"] == "explicit"]
+                   and c["probability_origin"] == "explicit" and type(c["event_occurred"]) is bool]
+    indeterminate_resolved = [c for c in due if c["lifecycle"] == "resolved" and c["outcome"] == "indeterminate"]
     adjudicated = categorical + probability
     counts = {v: sum(c["outcome"] == v for c in categorical)
               for v in ("supported", "contradicted", "mixed")}
     s, bad, partial = (counts[k] for k in ("supported", "contradicted", "mixed"))
-    qualities = [sum(c["evidence_quality"][k] for k in ("directness", "independence", "traceability"))/3
+    qualities = [sum(c["evidence_quality"][k] for k in ("directness", "independence", "traceability")) / 3
                  for c in adjudicated if c["evidence_quality"] is not None]
     briers = [(c["probability"] - int(c["event_occurred"])) ** 2 for c in probability]
+    brier_val = statistics.mean(briers) if briers else None
+    base_rate = statistics.mean(int(c["event_occurred"]) for c in probability) if probability else None
+    clim_brier = base_rate * (1 - base_rate) if base_rate is not None else None
+    bss = (1 - brier_val / clim_brier) if (brier_val is not None and clim_brier and clim_brier > 0) else None
+    cal_bins = _calibration_bins(probability, 10 if len(probability) >= 50 else 5) if len(probability) >= 20 else None
+    # Accountability excludes claims explicitly marked not_assessed (audit backlog, not speaker vagueness).
+    assessed_for_accountability = [c for c in eligible if c.get("operationalization_status") != "not_assessed"]
+    not_assessed_count = len(eligible) - len(assessed_for_accountability)
+    # Only count unreviewed/needs_review determinate resolutions or needs_review items as unaccepted blockers;
+    # confirmed indeterminate and awaiting_evidence do not deadlock composite.
+    unaccepted_due = sum(
+        1 for c in due
+        if c["review_state"] == "needs_review"
+        or (c["lifecycle"] == "resolved" and c["outcome"] in {"supported", "contradicted", "mixed"} and c["review_state"] != "accepted")
+    )
     return {
         "total_canonical_claims": len(claims), "endorsed_empirical_claims": len(eligible),
         "categorical_n": len(categorical), "categorical_counts": counts,
-        "strict_support_rate": ratio(s, s + bad + partial),
+        "strict_support_rate": ratio(s, s + bad + partial, with_ci=True),
         "partial_share": ratio(partial, s + bad + partial),
-        "binary_accuracy_excluding_mixed": ratio(s, s + bad),
-        "accountability": ratio(sum(c["accountability_eligible"] for c in eligible), len(eligible)),
-        "adjudication_coverage": ratio(len(adjudicated), len(due)),
-        "brier": {"value": statistics.mean(briers) if briers else None, "n": len(briers),
+        "binary_accuracy_excluding_mixed": ratio(s, s + bad, with_ci=True),
+        "accountability": ratio(sum(c["accountability_eligible"] for c in assessed_for_accountability), len(assessed_for_accountability), with_ci=True),
+        "not_assessed_operationalization_count": not_assessed_count,
+        "adjudication_coverage": ratio(len(adjudicated), len(due), with_ci=True),
+        "indeterminate_resolved_n": len(indeterminate_resolved),
+        "family_metrics": _family_stats(categorical, bootstrap=bootstrap_clusters),
+        "brier": {"value": brier_val, "n": len(briers),
+                  "base_rate": base_rate, "climatology_brier": clim_brier, "brier_skill_score": bss,
+                  "naive_025_reference": 0.25, "small_sample": len(briers) < 20,
+                  "calibration_bins": cal_bins,
                   "lower_is_better": True, "explicit_probabilities_only": True},
         "evidence_quality": {"mean": statistics.mean(qualities) if qualities else None,
                              "assessed_n": len(qualities), "expected_n": len(adjudicated)},
         "lifecycle_counts": {v: sum(c["lifecycle"] == v for c in eligible) for v in sorted(LIFECYCLES)},
         "excluded_from_categorical_accuracy": len(claims) - len(categorical),
-        "unaccepted_due_claims": sum(c["review_state"] != "accepted" for c in due),
-        "quality_blocked_resolutions": sum(c["lifecycle"] == "resolved" and not quality_allows_verdict(c) for c in due),
+        "unaccepted_due_claims": unaccepted_due,
+        "quality_blocked_resolutions": sum(c["lifecycle"] == "resolved" and c["outcome"] in {"supported", "contradicted", "mixed"} and not quality_allows_verdict(c) for c in due),
     }
+
+
+def _horizon_bucket(c):
+    crit = c.get("criteria") or {}
+    defn = crit.get("definition") or {}
+    start, end = defn.get("window_start"), defn.get("window_end")
+    if not end:
+        return "undated"
+    if not start:
+        return "unknown_start"
+    try:
+        s_dt = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        e_dt = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+        days = (e_dt - s_dt).total_seconds() / 86400
+    except ValueError:
+        return "unknown"
+    if days <= 30:
+        return "le_30d"
+    if days <= 180:
+        return "1_to_6m"
+    if days <= 730:
+        return "6_to_24m"
+    return "gt_24m"
+
+
+def _period_key(c):
+    ts = c.get("first_stated_at") or c.get("published_at")
+    if isinstance(ts, str) and len(ts) >= 4 and ts[:4].isdigit():
+        return ts[:4]
+    return "unknown"
 
 
 def validate_coverage(c):
@@ -234,7 +362,7 @@ def validate_policy(p):
         raise ValueError("Composite weights must sum to one")
 
 
-def calculate(claims, coverage, *, composite=False, policy=None, occurrences=None, subject_id=None):
+def calculate(claims, coverage, *, composite=False, policy=None, occurrences=None, subject_id=None, bootstrap_clusters=False):
     policy = POLICY.copy() if policy is None else policy
     validate_policy(policy)
     seen = set()
@@ -257,7 +385,7 @@ def calculate(claims, coverage, *, composite=False, policy=None, occurrences=Non
     elif len({c["subject_id"] for c in claims}) > 1:
         raise ValueError("Multiple subject_id values: select one subject to avoid combining speakers")
     validate_coverage(coverage)
-    metrics = core_metrics(claims)
+    metrics = core_metrics(claims, bootstrap_clusters=bootstrap_clusters)
     metrics["subject_id"] = claims[0]["subject_id"] if claims else subject_id
     source = ratio(coverage["acquired_sources"], coverage["eligible_sources"])
     extraction = ratio(coverage["extracted_sources"], coverage["eligible_sources"])
@@ -289,8 +417,38 @@ def calculate(claims, coverage, *, composite=False, policy=None, occurrences=Non
                        policy["accountability_weight"] * metrics["accountability"]["value"])
     metrics["composite"] = {"value": value, "requested": composite, "scale": [0, 100],
         "blockers": blockers, "policy": policy, "label": "custom_descriptive_index_not_personal_truth"}
-    metrics["by_domain"] = {d: core_metrics([c for c in claims if c["domain"] == d])
+    metrics["by_claim_type"] = {k: core_metrics([c for c in claims if c["claim_type"] == k], bootstrap_clusters=bootstrap_clusters)
+                                for k in sorted({c["claim_type"] for c in claims})}
+    metrics["by_domain"] = {d: core_metrics([c for c in claims if c["domain"] == d], bootstrap_clusters=bootstrap_clusters)
                             for d in sorted({c["domain"] for c in claims})}
+    metrics["by_period"] = {p: core_metrics([c for c in claims if _period_key(c) == p])
+                            for p in sorted({_period_key(c) for c in claims})}
+    metrics["by_horizon"] = {h: core_metrics([c for c in claims if _horizon_bucket(c) == h])
+                             for h in sorted({_horizon_bucket(c) for c in claims})}
+    metrics["selection_funnel"] = {
+        "total_canonical_claims": len(claims),
+        "empirical": sum(1 for c in claims if c["empirical"]),
+        "endorsed_empirical": sum(1 for c in claims if c["empirical"] and c["endorsement"] == "endorsed"),
+        "high_attribution": metrics["endorsed_empirical_claims"],
+        "accountability_eligible": sum(1 for c in claims if c["empirical"] and c["endorsement"] == "endorsed" and c["attribution_confidence"] == "high" and c["accountability_eligible"]),
+        "due_for_assessment": metrics["adjudication_coverage"]["denominator"],
+        "adjudicated_total": metrics["adjudication_coverage"]["numerator"],
+        "categorical_n": metrics["categorical_n"],
+        "probabilistic_n": metrics["brier"]["n"],
+        "indeterminate_resolved_n": metrics["indeterminate_resolved_n"],
+        "excluded_low_medium_attribution": sum(1 for c in claims if c["empirical"] and c["endorsement"] == "endorsed" and c["attribution_confidence"] != "high"),
+    }
+    warnings = []
+    fam_div = metrics["family_metrics"].get("family_vs_claim_divergence")
+    if fam_div is not None and fam_div > 0.10:
+        warnings.append(f"family_vs_claim_divergence={fam_div:.3f}: repeated correlated claims shift support rate")
+    pred_rate = (metrics["by_claim_type"].get("prediction") or {}).get("strict_support_rate", {}).get("value")
+    fact_rate = (metrics["by_claim_type"].get("factual") or {}).get("strict_support_rate", {}).get("value")
+    if pred_rate is not None and fact_rate is not None and abs(pred_rate - fact_rate) > 0.15:
+        warnings.append(f"prediction_vs_factual_gap={abs(pred_rate - fact_rate):.3f}: inspect prediction and factual metrics separately")
+    if metrics["not_assessed_operationalization_count"]:
+        warnings.append(f"{metrics['not_assessed_operationalization_count']} claims marked not_assessed for operationalization")
+    metrics["warnings"] = warnings
     metrics["noncheckable_expression_share"] = None
     if occurrences is not None:
         index = {c["claim_id"]: c for c in claims}
@@ -317,27 +475,16 @@ def calculate(claims, coverage, *, composite=False, policy=None, occurrences=Non
         if expected != ids:
             raise ValueError("Occurrences ledger must cover every canonical occurrence exactly")
         metrics["noncheckable_expression_share"] = ratio(numerator, count)
-    metrics["uncertainty_note"] = "Descriptive corpus metrics; no normal-distribution or independent-sample claim. Model spread is separate."
+    metrics["uncertainty_note"] = "Descriptive corpus metrics; Wilson intervals assume exchangeable claims without adjudication error. Model spread is separate."
     return metrics
 
 
 def atomic_write(path, text):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp = tempfile.mkstemp(prefix=".metrics-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temp, path)
-    finally:
-        if os.path.exists(temp):
-            os.unlink(temp)
+    common.atomic_text(path, text)
 
 
 def csv_text(claims):
-    cols = ["claim_id", "text", "domain", "claim_type", "quantifiability", "verifiability",
+    cols = ["claim_id", "text", "domain", "claim_type", "family_id", "quantifiability", "verifiability",
             "lifecycle", "outcome", "probability", "occurrence_ids", "evidence_ids"]
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=cols)
@@ -388,7 +535,8 @@ def score_run(args):
                 verify_acceptance(run, claim, policy_path=args.model_policy, snapshot=snapshot)
                 verified += 1
         metrics = calculate(claims, coverage, composite=args.composite, policy=policy,
-                            occurrences=occurrences, subject_id=args.subject_id)
+                            occurrences=occurrences, subject_id=args.subject_id,
+                            bootstrap_clusters=getattr(args, "bootstrap_clusters", False))
         metrics["acceptance_verification"] = {
             "verified_resolutions": verified, "as_of": cfg["scope"]["as_of"],
             "policy": "recomputed_consensus_and_bound_evidence",
@@ -412,6 +560,7 @@ def main(argv=None):
     p.add_argument("--out", required=True)
     p.add_argument("--csv")
     p.add_argument("--composite", action="store_true")
+    p.add_argument("--bootstrap-clusters", action="store_true", help="Compute family_id cluster bootstrap 95%% CI")
     p.add_argument("--scoring-policy", help="Full JSON override of the documented heuristic scoring gates")
     p.add_argument("--model-policy", help="Frozen model policy; defaults to RUN/config/model-policy.json")
     args = p.parse_args(argv)

@@ -288,6 +288,108 @@ class AdoptionTests(unittest.TestCase):
         self.assertEqual(metrics['total_canonical_claims'], 1)
         self.assertEqual(metrics['acceptance_verification']['verified_resolutions'], 1)
 
+    def test_cross_timezone_deadline_uses_criteria_timezone(self):
+        # Run in Asia/Singapore at 2025-12-31T20:00:00Z (2026-01-01 04:00 SGT, still 2025-12-31 15:00 NYT).
+        run2 = self.run.parent / 'tz_run'
+        audit.init(Namespace(run=str(run2), subject='speaker', start='2025-01-01', end='2025-12-31',
+                             as_of='2025-12-31T20:00:00Z', timezone='Asia/Singapore', cutoff_mode='retrospective'))
+        defn = {'target': 'US close', 'predicate': 'Closed higher', 'window_start': '2025-01-01',
+                'window_end': '2025-12-31', 'timezone': 'America/New_York', 'condition': 'unconditional', 'resolution_basis': 'explicit'}
+        c = claim(lifecycle='ready', outcome=None, resolved_at=None, evidence_ids=[], review_state='unreviewed',
+                  criteria={'definition': defn, 'version': '1', 'frozen_at': '2025-01-01T00:00:00Z',
+                            'sha256': bridge.hashed(defn)})
+        audit.write_jsonl(run2 / 'claims.jsonl', [c])
+        audit.write_jsonl(run2 / 'occurrences.jsonl', [occurrence('o_c1', 'c1')])
+        audit.atomic_text(run2 / 'sources/source.md', 'Original quote.\n')
+        audit.write_jsonl(run2 / 'sources.jsonl', [{'source_id': 'source', 'source_url': 'https://example.org/talk',
+            'published_at': '2025-01-01', 'status': 'ready', 'content_path': 'sources/source.md',
+            'content_hash': bridge.file_sha(run2 / 'sources/source.md')}])
+        panel.init(run2)
+        pol = panel.read_json(run2 / 'config/model-policy.json')
+        pol.update(status='confirmed', selected_models=[{'id': 'a', 'provider': 'fixture', 'api_model': 'a',
+                   'availability': 'available', 'cost': {'mode': 'included', 'estimate_usd': 0}}])
+        pol['roles'] = {'lookup': ['a'], 'extract': ['a'], 'verify': ['a'], 'report': ['a'], 'judge': []}
+        pol['verification'] = {'mode': 'single', 'required_reviewers': ['a'], 'judge_model_id': None}
+        pol['report'] = {'reviewers': ['a'], 'judge_model_id': None}
+        panel.write_json(run2 / 'config/model-policy.json', pol)
+        panel.freeze(run2)
+        pol = panel.load_policy(run2 / 'config/model-policy.json')
+        audit.write_jsonl(run2 / 'evidence.jsonl', [{
+            'evidence_id': 'e-a', 'claim_ids': ['c1'], 'source_url': 'https://example.org/e',
+            'retrieved_at': '2025-12-31T20:00:00Z', 'available_at': '2025-12-31T19:00:00Z',
+            'excerpt': 'Closed higher.', 'relation': 'supports', 'source_family': 'nyse'}])
+        fp = bridge.verification_fingerprint(run2, c)
+        cons = panel.consensus(pol, [{'vote_id': 'v1', 'reviewer_id': 'a', 'claim_id': 'c1',
+                                      'criteria_hash': c['criteria']['sha256'], 'input_hash': fp,
+                                      'as_of': audit.config(run2)['scope']['as_of'], 'verdict': 'supported',
+                                      'normalized_result': {'outcome': 'supported'}, 'evidence_ids': ['e-a'],
+                                      'rationale': 'ok', 'independent': True}])
+        audit.write_json(run2 / 'cons.json', cons)
+        with self.assertRaisesRegex(ValueError, 'deadline has not arrived'):
+            bridge.adopt(run2, 'c1', run2 / 'cons.json')
+
+    def test_judge_adoption_ignores_overruled_vote_post_cutoff_evidence_and_reopen(self):
+        cfg = audit.config(self.run)
+        cfg['cutoff_mode'] = 'knowledge_as_of'
+        cfg['config_hash'] = audit.digest(audit.config_body(cfg))
+        audit.write_json(self.run / 'run.json', cfg)
+        pol = copy.deepcopy(self.policy)
+        pol['selected_models'].append({'id': 'j', 'provider': 'fixture', 'api_model': 'j',
+                                       'availability': 'available', 'cost': {'mode': 'included', 'estimate_usd': 0}})
+        pol['roles']['judge'] = ['j']
+        pol['verification'] = {'mode': 'judge', 'required_reviewers': ['a', 'b'], 'judge_model_id': 'j'}
+        pol.pop('policy_hash', None)
+        (self.run / 'config/model-policy.lock.json').unlink()
+        panel.write_json(self.run / 'config/model-policy.json', pol)
+        panel.freeze(self.run)
+        pol = panel.load_policy(self.run / 'config/model-policy.json')
+        ev_bad = {'evidence_id': 'e-a', 'claim_ids': ['c1'], 'source_url': 'https://example.org/bad',
+                  'retrieved_at': '2026-01-02T10:00:00Z', 'available_at': '2026-01-05T00:00:00Z',
+                  'excerpt': 'Post-cutoff', 'relation': 'contradicts', 'source_family': 'late'}
+        ev_good = {'evidence_id': 'e-b', 'claim_ids': ['c1'], 'source_url': 'https://example.org/good',
+                   'retrieved_at': '2026-01-02T10:00:00Z', 'available_at': '2025-12-31T20:00:00Z',
+                   'excerpt': 'In-cutoff support', 'relation': 'supports', 'source_family': 'primary'}
+        audit.write_jsonl(self.run / 'evidence.jsonl', [ev_bad, ev_good])
+        fp = bridge.verification_fingerprint(self.run, self.claim)
+        votes = [
+            {'vote_id': 'v-a', 'reviewer_id': 'a', 'claim_id': 'c1', 'criteria_hash': self.claim['criteria']['sha256'],
+             'input_hash': fp, 'as_of': cfg['scope']['as_of'], 'verdict': 'contradicted',
+             'normalized_result': {'outcome': 'contradicted'}, 'evidence_ids': ['e-a'],
+             'rationale': 'Used late source', 'independent': True},
+            {'vote_id': 'v-b', 'reviewer_id': 'b', 'claim_id': 'c1', 'criteria_hash': self.claim['criteria']['sha256'],
+             'input_hash': fp, 'as_of': cfg['scope']['as_of'], 'verdict': 'supported',
+             'normalized_result': {'outcome': 'supported'}, 'evidence_ids': ['e-b'],
+             'rationale': 'Valid source', 'independent': True},
+        ]
+        dec = {'decision_id': 'd-1', 'actor_type': 'model', 'actor_id': 'j', 'claim_id': 'c1',
+               'criteria_hash': self.claim['criteria']['sha256'], 'input_hash': fp, 'as_of': cfg['scope']['as_of'],
+               'verdict': 'supported', 'normalized_result': {'outcome': 'supported'}, 'evidence_ids': ['e-b'],
+               'rationale': 'Overruled vote A post-cutoff evidence', 'considered_vote_ids': ['v-a', 'v-b']}
+        cons = panel.consensus(pol, votes, dec)
+        audit.write_json(self.consensus_path, cons)
+        res = self.adopt()
+        self.assertTrue(res['adopted'])
+        self.assertEqual(self.adopted()['evidence_ids'], ['e-b'])
+        reopened = bridge.reopen(self.run, 'c1', 'new_evidence', 'reviewer_human', 'Test reopen')
+        self.assertTrue(reopened['reopened'])
+        self.assertIsNone(self.adopted()['acceptance'])
+
+    def test_relation_mismatch_and_undated_contradicted_rejected(self):
+        self.evidence[0]['relation'] = 'contradicts'
+        self.evidence[1]['relation'] = 'contradicts'
+        audit.write_jsonl(self.run / 'evidence.jsonl', self.evidence)
+        self.assert_rejected_without_claim_write()
+        # Undated prediction cannot be adopted as contradicted.
+        self.claim['criteria']['definition']['window_end'] = None
+        self.claim['criteria']['sha256'] = bridge.hashed(self.claim['criteria']['definition'])
+        audit.write_jsonl(self.run / 'claims.jsonl', [self.claim])
+        for v in self.votes:
+            v.update(verdict='contradicted', normalized_result={'outcome': 'contradicted'},
+                     input_hash=bridge.verification_fingerprint(self.run, self.claim))
+        audit.write_json(self.consensus_path, panel.consensus(self.policy, self.votes))
+        with self.assertRaisesRegex(ValueError, 'Undated predictions'):
+            self.adopt()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Manifest-based OpenAI transcription with estimate approval and resumable files.
 
-Python 3.10+ standard library. Network calls occur only in `run`; there are no
+Python 3.9+ standard library. Network calls occur only in `run`; there are no
 implicit retries. See ../references/transcription.md before using paid APIs.
 """
 from __future__ import annotations
@@ -23,9 +23,12 @@ import urllib.error
 import urllib.request
 import uuid
 
+import _common as common
+
 ENDPOINT = "https://api.openai.com/v1/audio/transcriptions"
 MAX_FILE_BYTES = 25_000_000
 EXTENSIONS = {".flac", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".ogg", ".wav", ".webm"}
+BCP47_TAG = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*")
 
 
 class StopRun(Exception):
@@ -124,8 +127,11 @@ def request_fields(model, response_format, language_field, languages, timestamps
     return fields
 
 
-def load_items(manifest, model, response_format="json", language_field="auto", timestamps=(), probe=False):
+def load_items(manifest, model, response_format="json", language_field="auto", timestamps=(), probe=False, media_root=None):
     manifest = Path(manifest).resolve()
+    allowed_roots = [manifest.parent.resolve()]
+    if media_root is not None:
+        allowed_roots.append(Path(media_root).resolve())
     rows, ids, request_keys = [], set(), {}
     with manifest.open(encoding="utf-8") as f:
         for line_number, line in enumerate(f, 1):
@@ -139,9 +145,14 @@ def load_items(manifest, model, response_format="json", language_field="auto", t
             if not isinstance(item_id, str) or not item_id.strip() or item_id in ids:
                 raise StopRun(f"Missing/duplicate id at line {line_number}")
             ids.add(item_id)
-            if not isinstance(raw_path, str):
+            if not isinstance(raw_path, str) or not raw_path.strip():
                 raise StopRun(f"Invalid path at line {line_number}")
-            path = (manifest.parent / raw_path).resolve()
+            raw = Path(raw_path)
+            if raw.is_absolute() and media_root is None:
+                raise StopRun(f"Audio path at line {line_number} must be relative to the manifest directory")
+            path = (manifest.parent / raw).resolve() if not raw.is_absolute() else raw.resolve()
+            if not any(path.is_relative_to(root) for root in allowed_roots):
+                raise StopRun(f"Audio path at line {line_number} escapes the authorized directory")
             if not path.is_file() or path.suffix.lower() not in EXTENSIONS:
                 raise StopRun(f"Missing file or unsupported audio extension at line {line_number}")
             size = path.stat().st_size
@@ -151,7 +162,7 @@ def load_items(manifest, model, response_format="json", language_field="auto", t
             languages = row.get("language") or []
             if isinstance(languages, str):
                 languages = [languages]
-            if not isinstance(languages, list) or any(not isinstance(x, str) or not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z]{2,3})?", x) for x in languages):
+            if not isinstance(languages, list) or any(not isinstance(x, str) or not BCP47_TAG.fullmatch(x) for x in languages):
                 raise StopRun(f"Invalid language hint at line {line_number}")
             fields = request_fields(model, response_format, language_field, languages, timestamps)
             sha = file_sha(path)
@@ -190,40 +201,38 @@ def make_estimate(args):
     if (dt.datetime.now(dt.timezone.utc).date() - checked).days > 7:
         raise StopRun("Pricing check is older than 7 days; verify the rate again")
     manifest = Path(args.manifest).resolve()
-    items = load_items(manifest, args.model, args.response_format, args.language_field, args.timestamps, args.probe_duration)
+    media_root = Path(args.media_root).resolve() if getattr(args, "media_root", None) else None
+    items = load_items(manifest, args.model, args.response_format, args.language_field, args.timestamps, args.probe_duration, media_root=media_root)
     total = sum(x["duration_seconds"] for x in items) / 60 * rate
+    over_budget = budget is not None and (total * margin) > budget
     plan = {"schema_version": 1, "created_at": now(),
             "valid_until": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=valid_hours)).isoformat(), "manifest_path": str(manifest),
-            "manifest_sha256": file_sha(manifest), "model": args.model,
+            "manifest_sha256": file_sha(manifest), "media_root": str(media_root) if media_root else None, "model": args.model,
             "response_format": args.response_format, "usd_per_minute": rate,
             "price_source": args.price_source, "price_checked_at": args.price_checked_at,
             "budget_usd": budget, "safety_multiplier": margin,
             "deviation_fraction": positive(args.deviation_fraction, "deviation_fraction"),
             "deviation_floor_usd": positive(args.deviation_floor_usd, "deviation_floor_usd", True),
-            "estimated_usd": total, "estimated_upper_usd": total * margin,
+            "estimated_usd": total, "estimated_upper_usd": total * margin, "over_budget": over_budget,
             "actual_usd": None, "items": items}
     envelope = {"estimate_id": digest(plan), "plan": plan}
     atomic_json(args.output, envelope)
+    if over_budget:
+        print(json.dumps({"warning": "Estimated upper cost exceeds budget_usd", "estimated_upper_usd": total * margin, "budget_usd": budget}), file=sys.stderr)
     print(json.dumps({"estimate_file": str(Path(args.output).resolve()), "estimate_id": envelope["estimate_id"],
                       "unique_requests": len(items), "minutes": sum(i["duration_seconds"] for i in items) / 60,
                       "estimated_usd": total, "estimated_upper_usd": total * margin,
-                      "budget_usd": budget, "network_calls": 0}, ensure_ascii=False))
+                      "budget_usd": budget, "over_budget": over_budget, "network_calls": 0}, ensure_ascii=False))
     return envelope
 
 
 @contextlib.contextmanager
 def run_lock(state_dir):
-    lock = state_dir / ".run.lock"
     try:
-        fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        raise StopRun("State directory is locked. Check for a running process; only remove a stale .run.lock after confirming it stopped") from None
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(json.dumps({"pid": os.getpid(), "started_at": now()}))
-        yield
-    finally:
-        lock.unlink(missing_ok=True)
+        with common.advisory_lock(state_dir, ".run.lock", "State directory is locked by another transcription run"):
+            yield
+    except ValueError as exc:
+        raise StopRun(str(exc)) from None
 
 
 def multipart(item):
@@ -313,10 +322,9 @@ def execute(args, transport=None):
         raise StopRun("Approved estimate needs a budget_usd; regenerate with --budget-usd")
     if file_sha(plan["manifest_path"]) != plan["manifest_sha256"]:
         raise StopRun("Manifest changed since estimate; re-estimate and check the existing authorization scope")
-    for item in plan["items"]:
-        p = Path(item["path"])
-        if p.stat().st_size != item["size_bytes"] or file_sha(p) != item["sha256"]:
-            raise StopRun("Audio changed since estimate; re-estimate and check the existing authorization scope")
+    allowed_roots = [Path(plan["manifest_path"]).resolve().parent]
+    if plan.get("media_root"):
+        allowed_roots.append(Path(plan["media_root"]).resolve())
     state_dir = Path(args.state_dir).resolve()
     state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / "items").mkdir(exist_ok=True)
@@ -327,6 +335,9 @@ def execute(args, transport=None):
         states = {}
         for item in plan["items"]:
             key = item["request_key"]
+            p = Path(item["path"]).resolve()
+            if not any(p.is_relative_to(root) for root in allowed_roots):
+                raise StopRun("Audio path escapes the authorized manifest/media directory")
             path = state_dir / "items" / (key + ".json")
             if path.exists():
                 state = read_json(path)
@@ -350,6 +361,8 @@ def execute(args, transport=None):
                     else:
                         raise StopRun("A completed response is missing or changed; restore it instead of retranscribing")
                 states[key] = state
+            elif p.stat().st_size != item["size_bytes"] or file_sha(p) != item["sha256"]:
+                raise StopRun("Audio changed since estimate; re-estimate and check the existing authorization scope")
         summary = snapshot(plan, states)
         check_cost(plan, summary, waiver)
         if summary["remaining"]:
@@ -382,6 +395,13 @@ def execute(args, transport=None):
                 atomic_json(path, state)
                 states[key] = state
                 append_event(event_path, {"type": "request_completed", **state})
+                if getattr(args, "costs_ledger", None):
+                    append_event(Path(args.costs_ledger), {
+                        "schema_version": 1, "cost_event_id": f"stt_{envelope['estimate_id'][:12]}_{key[:12]}",
+                        "stage": "transcribe", "provider": "openai", "model": plan["model"],
+                        "request_key": key, "item_id": item["id"], "at": state["at"],
+                        "estimated_usd": state["estimated_usd"], "actual_usd": None,
+                        "cost_duration_seconds": state["cost_duration_seconds"], "currency": "USD"})
             except BaseException:
                 # Includes interruption. Do not expose exception bodies/headers or retry automatically.
                 atomic_json(path, {**submitting, "status": "uncertain", "at": now()})
@@ -428,6 +448,7 @@ def parser():
     estimate.add_argument("--language-field", choices=["auto", "language", "languages[]"], default="auto")
     estimate.add_argument("--timestamps", nargs="*", choices=["word", "segment"], default=[])
     estimate.add_argument("--probe-duration", action="store_true", help="Use ffprobe for every file instead of trusting manifest durations")
+    estimate.add_argument("--media-root", help="Optional explicit directory allowed for audio paths outside manifest directory")
     estimate.add_argument("--safety-multiplier", type=float, default=1.3)
     estimate.add_argument("--deviation-fraction", type=float, default=0.25)
     estimate.add_argument("--deviation-floor-usd", type=float, default=1.0)
@@ -437,6 +458,7 @@ def parser():
     mode.add_argument("--cost-waiver", metavar="FILE", help="Estimate JSON; use ONLY after an explicit user waiver of cost limits")
     run.add_argument("--approval-note", required=True)
     run.add_argument("--state-dir", required=True)
+    run.add_argument("--costs-ledger", help="Optional main run costs.jsonl path to append per-item STT cost events")
     run.add_argument("--timeout", type=float, default=180.0)
     return p
 

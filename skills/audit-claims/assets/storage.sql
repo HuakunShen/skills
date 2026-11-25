@@ -49,6 +49,18 @@ CREATE TABLE IF NOT EXISTS media_assets (
   source_id TEXT REFERENCES sources(id) DEFERRABLE INITIALLY DEFERRED,
   payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
 );
+CREATE TABLE IF NOT EXISTS criteria_versions (
+  id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL,
+  payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+);
+CREATE TABLE IF NOT EXISTS longitudinal_stances (
+  id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL,
+  payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+);
+CREATE TABLE IF NOT EXISTS longitudinal_transitions (
+  id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL,
+  payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+);
 CREATE INDEX IF NOT EXISTS occurrences_source ON occurrences(source_id);
 CREATE INDEX IF NOT EXISTS occurrences_claim ON occurrences(claim_id);
 CREATE INDEX IF NOT EXISTS media_assets_source ON media_assets(source_id);

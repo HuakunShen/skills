@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 
+import _common as common
 import audit_run as ledger
 
 TABLES = {
@@ -27,6 +28,9 @@ TABLES = {
     'cost_events': ('costs.jsonl', 'cost_event_id', []),
     'source_access': ('source_access.jsonl', 'access_id', ['source_id']),
     'media_assets': ('media_assets.jsonl', 'media_id', ['source_id']),
+    'criteria_versions': ('criteria_versions.jsonl', 'sha256', []),
+    'longitudinal_stances': ('longitudinal/stances.jsonl', 'stance_id', []),
+    'longitudinal_transitions': ('longitudinal/transitions.jsonl', 'transition_id', []),
 }
 MEDIA_EXTENSIONS = {'wav', 'mp3', 'm4a', 'flac', 'ogg', 'oga', 'opus', 'aac', 'mp4', 'webm', 'mkv',
                     'mov', 'm4v', 'avi', 'wmv', 'mpeg', 'mpg', 'aiff', 'aif', 'caf', 'wma', 'pcm', 'amr'}
@@ -243,6 +247,30 @@ def import_jsonl(args):
             input_path = ledger.inside(run, filename)
             if input_path.exists():
                 prepared[table] = read_table(input_path, key, table)
+            elif table == 'review_votes' and (run / 'reviews/facts').is_dir():
+                fact_rows = []
+                for f in sorted((run / 'reviews/facts').glob('*.jsonl')):
+                    fact_rows.extend(read_table(f, 'vote_id', table))
+                if fact_rows:
+                    prepared[table] = fact_rows
+            elif table == 'decisions' and (run / 'reviews/decisions').is_dir():
+                dec_rows = []
+                for f in sorted((run / 'reviews/decisions').glob('*.json')):
+                    art = strict_json(f.read_text(encoding='utf-8'))
+                    cons = art.get('consensus', {})
+                    cid = cons.get('claim_id') or (cons.get('decision') or {}).get('claim_id')
+                    dec_rows.append({'decision_id': f.stem, 'claim_id': cid, 'schema_version': art.get('schema_version', 1), **art})
+                if dec_rows:
+                    prepared[table] = dec_rows
+            elif table == 'criteria_versions' and (run / 'criteria').is_dir():
+                crit_rows = []
+                for f in sorted((run / 'criteria').glob('*.json')):
+                    obj = strict_json(f.read_text(encoding='utf-8'))
+                    obj.setdefault('sha256', f.stem)
+                    obj.setdefault('schema_version', 1)
+                    crit_rows.append(obj)
+                if crit_rows:
+                    prepared[table] = crit_rows
         if not prepared:
             raise ValueError('No canonical JSONL ledgers found')
         schema = (Path(__file__).resolve().parent.parent / 'assets/storage.sql').read_text(encoding='utf-8')
@@ -296,7 +324,11 @@ def export_jsonl(args):
             connection.execute('BEGIN')
             manifest = {}
             for table, (filename, key, edges) in TABLES.items():
+                if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    continue
                 rows = [strict_json(row[0]) for row in connection.execute(f'SELECT payload_json FROM {table} ORDER BY id')]
+                if not rows and table in {'criteria_versions', 'longitudinal_stances', 'longitudinal_transitions'}:
+                    continue
                 content = ''.join(encode(row) + '\n' for row in rows)
                 ledger.atomic_text(temporary / filename, content)
                 manifest[filename] = {'records': len(rows), 'sha256': digest_bytes(content.encode('utf-8'))}

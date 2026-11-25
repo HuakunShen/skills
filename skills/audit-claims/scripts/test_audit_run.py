@@ -247,6 +247,82 @@ class AuditRunTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'payload_hash'):
             audit.validate(self.run)
 
+    def test_future_as_of_and_nan_rejected_and_unique_run_id(self):
+        other = Namespace(**vars(self.args))
+        other.run = str(self.run.parent / 'run_same_scope')
+        audit.init(other)
+        self.assertNotEqual(audit.config(self.run)['run_id'], audit.config(Path(other.run))['run_id'])
+        bad = Namespace(**vars(self.args))
+        bad.run = str(self.run.parent / 'future_run')
+        bad.as_of = '2099-01-01'
+        with self.assertRaisesRegex(ValueError, 'future'):
+            audit.init(bad)
+        with self.assertRaisesRegex(ValueError, 'Out of range|allow_nan'):
+            audit.canonical({'x': float('nan')})
+
+    def test_deterministic_glue_pipeline_segment_merge_freeze_coverage_and_handoff(self):
+        import audit_pipeline as pipeline
+        import model_panel as panel
+        # Segment an oversized source, plan, run extraction, verify quotes, freeze criteria, compute coverage & handoff.
+        long_text = '\n\n'.join(f'Sentence {i} states fact {i}.' for i in range(1, 35))
+        import normalize_sources as norm
+        inp = self.run.parent / 'inp'
+        inp.mkdir()
+        (inp / 'long.txt').write_text(long_text, encoding='utf-8')
+        norm.ingest(Namespace(manifest=str(self._write_manifest(inp, 'long.txt')), run=str(self.run),
+                              max_bytes=1024*1024, max_batch_bytes=1024*1024, locator_mode='compact',
+                              clean_youtube_vtt=False, append=False))
+        seg_res = pipeline.segment_source(audit, self.run, 's1', token_budget=320, overlap_units=1)
+        self.assertGreaterEqual(len(seg_res['segments']), 2)
+        self.plan(budget=400, max_items=10)
+        tasks = audit.read_jsonl(self.run / 'tasks.jsonl')
+        first_task = tasks[0]
+        # Test external handoff export/import on second task if present, or checkpoint first task + merge quote check.
+        bad_shard = {'task_id': first_task['task_id'], 'input_fingerprint': first_task['input_fingerprint'],
+                     'complete': True, 'processed_source_ids': first_task['source_ids'],
+                     'claims': [
+                         {'text': 'Real fact 1', 'claim_type': 'factual', 'empirical': True, 'verifiability': 'verifiable',
+                          'occurrences': [{'source_id': first_task['source_ids'][0], 'original_quote': 'Sentence 1 states fact 1.',
+                                           'locator': {'kind': 'paragraph', 'unit_id': 'p-000001', 'start': 1, 'end': 1}}]},
+                         {'text': 'Hallucinated quote', 'claim_type': 'factual', 'empirical': True,
+                          'occurrences': [{'source_id': first_task['source_ids'][0], 'original_quote': 'Never said this.',
+                                           'locator': {'kind': 'paragraph', 'unit_id': 'p-000001', 'start': 1, 'end': 1}}]},
+                     ]}
+        res_rel = f"work/results/{first_task['task_id']}.json"
+        audit.write_json(self.run / res_rel, bad_shard)
+        audit.checkpoint(Namespace(run=str(self.run), task_id=first_task['task_id'], status='completed', result=res_rel, note=None))
+        merged = pipeline.merge_extraction(audit, self.run)
+        self.assertEqual(merged['unverified_quotes'], 1)
+        claims = {c['text']: c for c in audit.read_jsonl(self.run / 'claims.jsonl')}
+        self.assertTrue(claims['Real fact 1']['quote_verified'])
+        self.assertFalse(claims['Hallucinated quote']['quote_verified'])
+        self.assertEqual(claims['Hallucinated quote']['review_state'], 'needs_review')
+        def_path = self.run / 'crit_def.json'
+        audit.write_json(def_path, {'target': 'fact 1', 'predicate': 'true', 'window_start': '2024-01-01',
+                                    'window_end': '2024-12-31', 'timezone': 'UTC', 'condition': 'unconditional',
+                                    'resolution_basis': 'explicit'})
+        frozen = pipeline.freeze_criteria(audit, self.run, claims['Real fact 1']['claim_id'], def_path)
+        self.assertTrue(frozen['due_for_assessment'])
+        cov = pipeline.compute_coverage(audit, self.run)
+        self.assertEqual(cov['eligible_sources'], 1)
+        self.assertEqual(cov['acquired_sources'], 1)
+        if len(tasks) > 1:
+            t2 = tasks[1]
+            pkt = pipeline.handoff_export(audit, self.run, [t2['task_id']], packet_id='pkt1')
+            self.assertEqual(pkt['tasks_blocked'], 1)
+            ret = self.run / 'ret.json'
+            audit.write_json(ret, {'packet_id': 'pkt1', 'results': [{
+                'task_id': t2['task_id'], 'input_fingerprint': t2['input_fingerprint'],
+                'complete': True, 'processed_source_ids': t2['source_ids'], 'claims': []}]})
+            imp = pipeline.handoff_import(audit, self.run, 'pkt1', ret)
+            self.assertEqual(imp['imported_tasks'], [t2['task_id']])
+
+    def _write_manifest(self, inp, filename):
+        m = inp / 'manifest.jsonl'
+        audit.write_jsonl(m, [{'source_id': 's1', 'title': 'Long', 'source_url': None,
+                               'published_at': '2024-06-01', 'path': filename}])
+        return m
+
 
 if __name__ == '__main__':
     unittest.main()

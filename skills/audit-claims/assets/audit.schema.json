@@ -649,7 +649,12 @@
           "then": {
             "required": [
               "acceptance"
-            ]
+            ],
+            "properties": {
+              "acceptance": {
+                "type": "object"
+              }
+            }
           }
         }
       ]
@@ -692,6 +697,7 @@
             "kind": {
               "enum": [
                 "timestamp",
+                "cue",
                 "paragraph",
                 "character",
                 "page"
@@ -849,7 +855,6 @@
       "required": [
         "schema_version",
         "evidence_id",
-        "source_url",
         "title",
         "retrieved_at",
         "published_at",
@@ -857,6 +862,18 @@
         "relation",
         "claim_ids",
         "source_family"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "source_url"
+          ]
+        },
+        {
+          "required": [
+            "local_path"
+          ]
+        }
       ],
       "additionalProperties": true
     },

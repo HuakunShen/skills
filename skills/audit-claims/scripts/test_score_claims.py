@@ -181,6 +181,40 @@ class ScoreClaimTests(unittest.TestCase):
         self.assertEqual([row['text'] for row in exported], ["'" + value for value in values])
         self.assertEqual([row['text'] for row in rows], values)
 
+    def test_claim_type_split_family_weighting_and_indeterminate_non_deadlock(self):
+        # 40 factual supported + 10 same-family prediction contradicted:
+        # pooled rate is 0.80, but prediction=0/10 and family_weighted separates the inflation.
+        facts = [claim(f'f{i}', claim_type='factual') for i in range(40)]
+        preds = [claim(f'p{i}', claim_type='prediction', family_id='btc-200k', outcome='contradicted') for i in range(10)]
+        indet = claim('indet', lifecycle='resolved', outcome='indeterminate', review_state='accepted',
+                      evidence_ids=[], evidence_quality=None)
+        awaiting = claim('wait', lifecycle='awaiting_evidence', outcome=None, review_state='unreviewed',
+                         evidence_ids=[], evidence_quality=None)
+        result = self.calculate(facts + preds + [indet, awaiting], composite=True, bootstrap_clusters=True)
+        self.assertAlmostEqual(result['by_claim_type']['factual']['strict_support_rate']['value'], 1.0)
+        self.assertAlmostEqual(result['by_claim_type']['prediction']['strict_support_rate']['value'], 0.0)
+        self.assertEqual(result['family_metrics']['family_count'], 41)
+        self.assertAlmostEqual(result['family_metrics']['family_weighted_strict_support_rate'], 40 / 41)
+        self.assertIsNotNone(result['family_metrics']['bootstrap_95_ci'])
+        self.assertIsNotNone(result['composite']['value'])
+        self.assertNotIn('unresolved_review_issues', result['composite']['blockers'])
+        self.assertTrue(any('prediction_vs_factual_gap' in w for w in result['warnings']))
+
+    def test_not_assessed_operationalization_and_inferred_prob_excluded_from_due(self):
+        rows = [
+            claim('c1'),
+            claim('na', criteria=None, accountability_eligible=False, due_for_assessment=False,
+                  lifecycle='pending', outcome=None, evidence_ids=[], evidence_quality=None,
+                  review_state='unreviewed', operationalization_status='not_assessed'),
+            claim('inf', evaluation_mode='probabilistic', probability=0.8, probability_origin='inferred',
+                  lifecycle='resolved', outcome=None, event_occurred=True),
+        ]
+        result = self.calculate(rows)
+        self.assertEqual(result['accountability']['numerator'], 2)
+        self.assertEqual(result['accountability']['denominator'], 2)
+        self.assertEqual(result['not_assessed_operationalization_count'], 1)
+        self.assertEqual(result['adjudication_coverage']['denominator'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -20,7 +20,6 @@
     "scope_note": "演示范围为最近五年。统计数字是手工构造的完整样本摘要，下方只展示部分合成原话与案例；不代表一次真实审计。"
   },
   "metrics": {
-    "canonical_claims": 212,
     "endorsed_empirical_claims": 180,
     "accountability": {
       "value": 0.8388888888888889,
@@ -59,9 +58,64 @@
     },
     "composite": {
       "value": null,
+      "requested": false,
+      "scale": [
+        0,
+        100
+      ],
+      "blockers": [
+        "minimum_adjudication_coverage",
+        "minimum_extraction_coverage"
+      ],
       "reason": "示例不发布综合分；权重与适用性需单独说明。"
     },
-    "synthetic": true
+    "synthetic": true,
+    "total_canonical_claims": 212,
+    "partial_share": {
+      "value": 0.13333333333333333,
+      "numerator": 10,
+      "denominator": 75
+    },
+    "binary_accuracy_excluding_mixed": {
+      "value": 0.7230769230769231,
+      "numerator": 47,
+      "denominator": 65
+    },
+    "evidence_quality": {
+      "mean": 0.84,
+      "assessed_n": 97,
+      "expected_n": 97
+    },
+    "lifecycle_counts": {
+      "awaiting_evidence": 6,
+      "disputed": 4,
+      "pending": 38,
+      "ready": 18,
+      "resolved": 97,
+      "unscorable": 17
+    },
+    "indeterminate_resolved_n": 5,
+    "by_claim_type": {
+      "prediction": {
+        "strict_support_rate": {
+          "value": 0.5625,
+          "numerator": 18,
+          "denominator": 32
+        }
+      },
+      "factual": {
+        "strict_support_rate": {
+          "value": 0.6744186046511628,
+          "numerator": 29,
+          "denominator": 43
+        }
+      }
+    },
+    "family_metrics": {
+      "family_count": 61,
+      "family_weighted_strict_support_rate": 0.59,
+      "family_vs_claim_divergence": 0.0367
+    }
   },
   "panel": {
     "policy": {
@@ -167,7 +221,7 @@
         "model_id": "a",
         "model_version": "synthetic-manual",
         "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-        "rubric_hash": "1eca51aa504373ffb44fc6bdb7403445a371dd10cda6b9a755095a220c116c2c",
+        "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
         "score_scale": {
           "min": 0,
           "max": 10
@@ -275,7 +329,7 @@
         "model_id": "b",
         "model_version": "synthetic-manual",
         "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-        "rubric_hash": "1eca51aa504373ffb44fc6bdb7403445a371dd10cda6b9a755095a220c116c2c",
+        "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
         "score_scale": {
           "min": 0,
           "max": 10
@@ -306,7 +360,7 @@
             "missing_reason": null
           },
           "fact_interpretation_separation": {
-            "rationale": "多数情况下把观察、解释和新判断分开；“所有团队”这类总括表述仍将推论写得过强。",
+            "rationale": "大多数句子能分开描述观测数据与个人推断，但部分转折段落仍省略推理中间步骤。",
             "supporting_evidence_ids": [
               "S02"
             ],
@@ -316,7 +370,7 @@
             "missing_reason": null
           },
           "prediction_operationality": {
-            "rationale": "给出了对象、阈值、期限和条件；全城与园区两次预测应独立保留，不能用新预测覆盖旧记录。",
+            "rationale": "关键预测给出了时间窗与范围；部分园区试点指标未事先定义量化门槛。",
             "supporting_evidence_ids": [
               "S01",
               "S03"
@@ -325,7 +379,7 @@
             "missing_reason": null
           },
           "uncertainty_expression": {
-            "rationale": "明确列出道路许可条件，并为新预测给出概率；早期全城外推对边界的说明不够充分。",
+            "rationale": "新预测给出了条件与概率，但早期的跨城乐观表态缺少边界警示。",
             "supporting_evidence_ids": [
               "S03"
             ],
@@ -341,7 +395,7 @@
             "missing_reason": "可观察的更正机会只有一处，无法据此评价稳定的更新纠错行为。"
           },
           "counterargument_engagement": {
-            "rationale": "对运营成本和新人反馈等反方理由有实质回应；部分总括性表述没有处理此前的反例。",
+            "rationale": "正面回应了运营成本质疑，唯对早期支持者的反例引用不够充分。",
             "supporting_evidence_ids": [
               "S02",
               "S05"
@@ -352,7 +406,7 @@
             "missing_reason": null
           },
           "stance_change_explanation": {
-            "rationale": "自动配送的更新解释了新材料和外推错误；远程协作后期对历史立场的概括仍需解释。",
+            "rationale": "自动配送线有明确新数据驱动的改口说明；远程协作议题前后自述存在轻微张力。",
             "supporting_evidence_ids": [
               "S02",
               "S03"
@@ -364,7 +418,7 @@
             "missing_reason": null
           },
           "argument_clarity": {
-            "rationale": "主要论点、适用人群和时间窗口较容易识别；少数概括句过宽，降低跨期对照的清晰度。",
+            "rationale": "结构紧凑、指标定义较清晰，少数宏观结论略显跳跃。",
             "supporting_evidence_ids": [
               "S01",
               "S05"
@@ -381,7 +435,7 @@
         "model_id": "c",
         "model_version": "synthetic-manual",
         "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-        "rubric_hash": "1eca51aa504373ffb44fc6bdb7403445a371dd10cda6b9a755095a220c116c2c",
+        "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
         "score_scale": {
           "min": 0,
           "max": 10
@@ -402,7 +456,7 @@
         "provenance": "Hand-constructed fixture; no actual model execution or independence claim.",
         "rationales": {
           "source_transparency": {
-            "rationale": "能够说明订单统计的范围和来源口径；部分讨论仍缺少原始材料的完整出处。",
+            "rationale": "公开材料与统计范围列示较详尽，比常见评论更易追溯到原始节点。",
             "supporting_evidence_ids": [
               "S01"
             ],
@@ -412,7 +466,7 @@
             "missing_reason": null
           },
           "fact_interpretation_separation": {
-            "rationale": "多数情况下把观察、解释和新判断分开；“所有团队”这类总括表述仍将推论写得过强。",
+            "rationale": "事实与推论总体分明；需注意个别概括句把团队局部表现外推为全员状态。",
             "supporting_evidence_ids": [
               "S02"
             ],
@@ -422,7 +476,7 @@
             "missing_reason": null
           },
           "prediction_operationality": {
-            "rationale": "给出了对象、阈值、期限和条件；全城与园区两次预测应独立保留，不能用新预测覆盖旧记录。",
+            "rationale": "目标与期限相对清楚，具备可检验条件。",
             "supporting_evidence_ids": [
               "S01",
               "S03"
@@ -431,7 +485,7 @@
             "missing_reason": null
           },
           "uncertainty_expression": {
-            "rationale": "明确列出道路许可条件，并为新预测给出概率；早期全城外推对边界的说明不够充分。",
+            "rationale": "对限制与前提条件的提示较平衡，能区分条件依赖与无条件结论。",
             "supporting_evidence_ids": [
               "S03"
             ],
@@ -447,7 +501,7 @@
             "missing_reason": "可观察的更正机会只有一处，无法据此评价稳定的更新纠错行为。"
           },
           "counterargument_engagement": {
-            "rationale": "对运营成本和新人反馈等反方理由有实质回应；部分总括性表述没有处理此前的反例。",
+            "rationale": "回应了核心成本与执行阻力，但在极端场景假设下回应偏简略。",
             "supporting_evidence_ids": [
               "S02",
               "S05"
@@ -458,7 +512,7 @@
             "missing_reason": null
           },
           "stance_change_explanation": {
-            "rationale": "自动配送的更新理由明确，但“我一直反对”的历史概括未解释；这一跨期缺口影响评分。",
+            "rationale": "两段对照说明了条件变化；历史一致性的口头总结与早年表态略有出入。",
             "supporting_evidence_ids": [
               "S02",
               "S03"
@@ -470,7 +524,7 @@
             "missing_reason": null
           },
           "argument_clarity": {
-            "rationale": "主要论点、适用人群和时间窗口较容易识别；少数概括句过宽，降低跨期对照的清晰度。",
+            "rationale": "论点与例子一一对应，阅读门槛低。",
             "supporting_evidence_ids": [
               "S01",
               "S05"
@@ -487,7 +541,7 @@
       "status": "completed",
       "model_id": "j",
       "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-      "rubric_hash": "1eca51aa504373ffb44fc6bdb7403445a371dd10cda6b9a755095a220c116c2c",
+      "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
       "score_scale": {
         "min": 0,
         "max": 10

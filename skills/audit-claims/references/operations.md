@@ -37,7 +37,7 @@ python3 scripts/audit_run.py init \
 
 初始化创建 `run.json`、`sources.jsonl`、`tasks.jsonl`、`claims.jsonl`、`evidence.jsonl`、`events.jsonl`、`progress.md`，以及 `sources/`、`work/batches/`、`work/results/`、`reports/`。
 
-配置哈希包含 `schema_version`、`subject`、`scope`、`cutoff_mode`、`rules`、`models`。在首次规划前固定规则和模型策略；如果需设置非空 `rules/models`，由协调 Agent 用脚本的 `digest(config_body(config))` 重新计算 `config_hash` 并记录原因。已有计划后不要以重算哈希掩盖策略改变，建立新 run 并保留旧 run。`execution`、价格、预算授权和进度不进入语义配置哈希，可单独更新并留痕。默认 `execution={"mode":"auto","max_workers":4}`。
+配置哈希包含 `schema_version`、`subject`、`scope`、`cutoff_mode`、`rules`、`models`。在首次规划前固定规则和模型策略；使用 `audit_run.py bind-policy --run <RUN>` 自动把冻结后的 `model-policy.json` 指纹与规则写入 `run.json` 并刷新 `config_hash`。已有计划后如需在保留已提取主张的情况下用新截点重新评估 `pending` 预测，使用 `audit_run.py assess --run <RUN> --as-of <ISO>` 开启新评估轮次。`execution`、价格、预算授权和进度不进入语义配置哈希，可单独更新并留痕。默认 `execution={"mode":"auto","max_workers":4}`。
 
 ## 准备来源清单
 
@@ -62,11 +62,18 @@ python3 scripts/audit_run.py plan-batches \
 
 `--token-budget` 是**可用输入预算**，调用者必须先扣除系统指令、工具结果、输出、跨文档引用和上下文安全余量。`--max-items` 可设为 10、50 或其他正整数，但不能覆盖 token 限制。单批提取可能输出比输入更细的结构化数据，需预留足够输出空间，防止模型输出截断。
 
-没有真实 tokenizer 计数时，脚本以 `UTF-8 字节数 + 128` 作刻意保守的上界估算；这可能显著高估英文，能避免中文混合文本被 `字符数/4` 低估。提供 `estimated_tokens` 时仍加 128 的每来源包装余量。仍须按实际宿主上下文容量和输出限制控制批次，不能把估算当作模型调用成功的保证。
+没有真实 tokenizer 计数时，脚本剥离 frontmatter 与定位标记后，以分脚本字节估算 `ceil(ascii_bytes/4) + non_ascii_bytes + 128`（避免中英文和字幕标记导致的过度膨胀）。仍须按实际宿主上下文容量和输出限制控制批次，不能把估算当作模型调用成功的保证。
 
-超预算来源进入 `plan.json.needs_segmentation`，不会被默默截断。先按段落/说话人/字幕时间切分为连续、有重叠的片段，记录父来源、字符或时间起止、重叠范围，验证无缺口，再在**新 run** 中规划。协调 Agent 合并片段时保留父来源身份，消除重叠导致的重复观点。脚本本身不自动切片。
+超预算来源进入 `plan.json.needs_segmentation`，不会被默默截断。先运行 `audit_run.py segment --run <RUN> --source-id <ID> --token-budget <N> --overlap-units 2` 在单位边界确定性切片（记录 `parent_source_id`、起止 unit、重叠与 100% 覆盖证明），再运行 `audit_run.py plan-batches --append` 将新切片或新增就绪来源追加纳入批次。
 
-`plan.json` 保存总体清单数、范围内数量、可用来源数、实际入批数、排除原因和待切片清单；`work/batches/*.json` 是固定的批次载荷，记录源文件位置及真实内容哈希。重复同一命令保留已完成任务；内容、元数据或分批参数改变会拒绝继续，要求新 run。
+`plan.json` 保存总体清单数、范围内数量、可用来源数、实际入批数、排除原因和待切片清单；`work/batches/*.json` 是固定的批次载荷，记录源文件位置及真实内容哈希。重复同一命令保留已完成任务；追加新来源使用 `normalize_sources.py --append` 与 `plan-batches --append`。
+
+完成批量提取后，运行确定性合并与统计胶水命令，避免手工重写账本：
+- `audit_run.py merge-extraction --run <RUN>`：合并已完成 shard，机械验证每条 `original_quote` 存在于对应源文件及 locator 区间内，未命中者标 `needs_review`。
+- `audit_run.py freeze-criteria --run <RUN> --claim-id <ID> --definition <JSON>`：生成规范 SHA-256 与服务端冻结时间戳并保存 `criteria/<sha>.json`。
+- `audit_run.py coverage --run <RUN>`：从 `sources.jsonl`、`plan.json`、`tasks.jsonl` 确定性回卷父来源统计并生成 `coverage.json`。
+- `audit_run.py handoff-export` / `handoff-import`：打包/校验外部 AI 任务包并写 `handoff/receipts.jsonl`。
+- `audit_run.py build-report-data --run <RUN>`：组装 `reports/report-data.json`。
 
 ## 提交结果与恢复
 

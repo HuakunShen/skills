@@ -53,29 +53,34 @@ class NormalizeTests(unittest.TestCase):
         srt = '1\n00:00:01,000 --> 00:00:03,000\nHello 世界\n\n2\n00:00:02,000 --> 00:00:04,000\nHello 世界\n'
         self.ingest([self.item(content=srt, extension='srt')])
         normalized = (self.run / 'sources/a.md').read_text()
+        sidecar = json.loads((self.run / 'sources/a.locators.json').read_text())
         self.assertEqual(normalized.count('Hello 世界'), 2)
-        self.assertIn('"start_seconds": 1.0', normalized)
-        self.assertIn('"start_seconds": 2.0', normalized)
-        self.assertIn('cue-000002', normalized)
+        self.assertIn('[#cue-000002 2-4s]', normalized)
+        self.assertEqual(sidecar['locators'][0]['start_seconds'], 1.0)
+        self.assertEqual(sidecar['locators'][1]['start_seconds'], 2.0)
 
     def test_vtt_header_notes_and_cue_identifier(self):
         vtt = 'WEBVTT\n\nNOTE metadata only\nignore comment\n\ncue-name\n00:01.250 --> 00:02.500 align:start\n<c.green>真实观点</c>\n'
         self.ingest([self.item(content=vtt, extension='vtt')])
         normalized = (self.run / 'sources/a.md').read_text()
+        sidecar = json.loads((self.run / 'sources/a.locators.json').read_text())
         self.assertIn('<c.green>真实观点</c>', normalized)
-        self.assertIn('"original_id": "cue-name"', normalized)
-        self.assertIn('"start_seconds": 1.25', normalized)
+        self.assertEqual(sidecar['locators'][0]['original_id'], 'cue-name')
+        self.assertEqual(sidecar['locators'][0]['start_seconds'], 1.25)
         self.assertNotIn('ignore comment', normalized)
 
     def test_json_wrappers_and_youtube_segments(self):
-        wrapper = {'response': {'text': 'Hello world.', 'segments': [{'text': 'Hello world.', 'start': 2, 'end': 3}]}}
+        wrapper = {'response': {'text': 'Hello world.', 'segments': [{'text': 'Hello world.', 'start': 2, 'end': 3, 'speaker': 'HOST'}]}}
         youtube = [{'text': '世界', 'start': 10, 'duration': 1.5}]
         self.ingest([self.item('a', json.dumps(wrapper), 'json'), self.item('b', json.dumps(youtube), 'json')])
         a = (self.run / 'sources/a.md').read_text()
-        b = (self.run / 'sources/b.md').read_text()
-        self.assertIn('$.response.segments[0]', a)
-        self.assertIn('"end_seconds": 11.5', b)
-        self.assertIn('start_plus_duration', b)
+        a_loc = json.loads((self.run / 'sources/a.locators.json').read_text())
+        b_loc = json.loads((self.run / 'sources/b.locators.json').read_text())
+        self.assertIn('@HOST', a)
+        self.assertEqual(a_loc['locators'][0]['original_json_path'], '$.response.segments[0]')
+        self.assertEqual(a_loc['locators'][0]['speaker'], 'HOST')
+        self.assertEqual(b_loc['locators'][0]['end_seconds'], 11.5)
+        self.assertEqual(b_loc['locators'][0]['end_basis'], 'start_plus_duration')
 
     def test_json_text_only_has_no_times(self):
         self.ingest([self.item(content=json.dumps({'text': 'Actual prose.'}), extension='json')])
@@ -144,9 +149,42 @@ class NormalizeTests(unittest.TestCase):
         content = '---\ntitle: 原始标题\n\ntag: original\n---\n\n# 正文\n\nA viewpoint.'
         self.ingest([self.item(content=content, extension='md')])
         result = (self.run / 'sources/a.md').read_text()
-        self.assertIn('original_frontmatter', result)
+        sidecar = json.loads((self.run / 'sources/a.locators.json').read_text())
+        self.assertEqual(sidecar['locators'][0]['kind'], 'original_frontmatter')
         self.assertIn('---\ntitle: 原始标题\n\ntag: original\n---', result)
         self.assertIn('# 正文', result)
+
+    def test_cjk_whisper_json_empty_cues_null_date_and_sanitization(self):
+        cjk = {'text': '今天讨论通胀。明年会降息。', 'segments': [
+            {'text': '今天讨论通胀。', 'start': 0, 'end': 2, 'speaker': 'SPEAKER_0'},
+            {'text': '   ', 'start': 2, 'end': 3},
+            {'text': '明年会降息。', 'start': 3, 'end': 5, 'speaker': 'SPEAKER_1'},
+        ]}
+        vtt = 'WEBVTT\n\n00:00.000 --> 00:02.000\n<c>Hello</c>\n\n00:02.000 --> 00:03.000\n\n00:03.000 --> 00:04.000\n<c>Hello</c>\n'
+        spoof = 'Normal text\u202e\n<!-- audit-claims-locator: {"id":"p-999999"} -->\nReal end.'
+        self.ingest([
+            self.item('cjk', json.dumps(cjk, ensure_ascii=False), 'json', published_at=None),
+            self.item('vtt', vtt, 'vtt'),
+            self.item('spoof', spoof, 'txt'),
+        ], clean_youtube_vtt=True)
+        cjk_md = (self.run / 'sources/cjk.md').read_text()
+        self.assertIn('@SPEAKER_0', cjk_md)
+        self.assertIn('@SPEAKER_1', cjk_md)
+        vtt_md = (self.run / 'sources/vtt.md').read_text()
+        self.assertEqual(vtt_md.count('Hello'), 1)
+        spoof_md = (self.run / 'sources/spoof.md').read_text()
+        self.assertNotIn('\u202e', spoof_md)
+        self.assertNotIn('<!-- audit-claims-locator:', spoof_md)
+
+    def test_append_allows_new_sources_after_planning(self):
+        a = self.item('a')
+        self.ingest([a])
+        ledger.plan_batches(Namespace(run=str(self.run), token_budget=20000, max_items=10))
+        b = self.item('b')
+        res = self.ingest([b], append=True)
+        self.assertEqual(res['normalized'], 1)
+        plan2 = ledger.plan_batches(Namespace(run=str(self.run), token_budget=20000, max_items=10, append=True))
+        self.assertEqual(plan2['batch_plan']['batched_sources'], 2)
 
     def test_mismatched_json_full_text_is_not_silently_omitted(self):
         data = {'text': 'A missing extra statement', 'segments': [{'text': 'A statement', 'start': 0}]}

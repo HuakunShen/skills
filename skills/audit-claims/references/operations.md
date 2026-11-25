@@ -71,8 +71,11 @@ python3 scripts/audit_run.py plan-batches \
 完成批量提取后，运行确定性合并与统计胶水命令，避免手工重写账本：
 - `audit_run.py merge-extraction --run <RUN>`：合并已完成 shard，机械验证每条 `original_quote` 存在于对应源文件及 locator 区间内，未命中者标 `needs_review`。
 - `audit_run.py freeze-criteria --run <RUN> --claim-id <ID> --definition <JSON>`：生成规范 SHA-256 与服务端冻结时间戳并保存 `criteria/<sha>.json`。
+- `adopt_verdict.py set-evidence-quality --run <RUN> --claim-id <ID> --directness <0|0.5|1> --independence <0|0.5|1> --traceability <0|0.5|1>`：在 `adopt` 之前写入证据质量评分，无需手工编辑 `claims.jsonl`。
+- `adopt_verdict.py mark-trigger-unmet --run <RUN> --claim-id <ID> --evidence-ids <EID...>`：冻结规则并查证后若条件预测触发器未满足，关联触发证据并记录 `lifecycle="pending"`、`due_for_assessment=false`、`reason="trigger_unmet"`（保留历史快照）。
 - `audit_run.py coverage --run <RUN>`：从 `sources.jsonl`、`plan.json`、`tasks.jsonl` 确定性回卷父来源统计并生成 `coverage.json`。
 - `audit_run.py handoff-export` / `handoff-import`：打包/校验外部 AI 任务包并写 `handoff/receipts.jsonl`。
+- `audit_run.py report-hashes --run <RUN>`：在写入 `reviews/reports/*.json` 前输出精确 `data_hash` 与 `rubric_hash`。
 - `audit_run.py build-report-data --run <RUN>`：组装 `reports/report-data.json`。
 
 ## 提交结果与恢复

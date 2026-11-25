@@ -118,19 +118,26 @@ def cue_body(cues, locator_mode="compact"):
 
 
 def subtitles(text, fmt, locator_mode="compact", clean_youtube_vtt=False):
-    lines = text.split("\n")
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     blocks, current, start = [], [], 0
     for index, line in enumerate(lines):
-        if line.strip():
+        # Per WebVTT spec, blocks are separated only by completely empty lines;
+        # real YouTube auto-VTT files emit whitespace-only lines (" ") inside cue payloads.
+        is_separator = (line == "") if fmt == "vtt" else (not line.strip())
+        if is_separator:
+            if current:
+                blocks.append((start, current))
+                current = []
+        elif not current and not line.strip():
+            continue
+        else:
             if not current:
                 start = index + 1
             current.append(line)
-        elif current:
-            blocks.append((start, current))
-            current = []
     if current:
         blocks.append((start, current))
     cues, skipped_empty = [], 0
+    prev_raw_lines = []
     if fmt == "vtt" and (not blocks or not blocks[0][1][0].startswith("WEBVTT")):
         raise ValueError("VTT input must have WEBVTT header")
     for block_number, (line_start, block) in enumerate(blocks):
@@ -146,23 +153,41 @@ def subtitles(text, fmt, locator_mode="compact", clean_youtube_vtt=False):
         if timing_index >= len(block) or not TIMING.match(block[timing_index]):
             raise ValueError(f"Malformed {fmt.upper()} cue near original line {line_start}")
         match = TIMING.match(block[timing_index])
-        cue_text = "\n".join(block[timing_index + 1:])
+        payload_lines = block[timing_index + 1:]
         if clean_youtube_vtt:
-            cue_text = VTT_INLINE_TAG.sub("", cue_text).strip()
-        if not cue_text.strip():
-            skipped_empty += 1
-            continue
+            cleaned_lines = [VTT_INLINE_TAG.sub("", line).strip() for line in payload_lines]
+            cleaned_lines = [line for line in cleaned_lines if line]
+            if not cleaned_lines:
+                skipped_empty += 1
+                continue
+        else:
+            cleaned_lines = [line for line in payload_lines if line.strip()]
+            if not cleaned_lines:
+                skipped_empty += 1
+                continue
         start_seconds, end_seconds = seconds(match.group(1)), seconds(match.group(2))
         if end_seconds < start_seconds:
             raise ValueError("Subtitle cue ends before it starts")
+        emitted_lines = cleaned_lines
+        if clean_youtube_vtt and cues and start_seconds <= cues[-1]["end_seconds"] + 1.0:
+            overlap = 0
+            for k in range(min(len(prev_raw_lines), len(cleaned_lines)), 0, -1):
+                if prev_raw_lines[-k:] == cleaned_lines[:k]:
+                    overlap = k
+                    break
+            if overlap == len(cleaned_lines):
+                cues[-1]["end_seconds"] = max(cues[-1]["end_seconds"], end_seconds)
+                cues[-1].setdefault("collapsed_cue_lines", [cues[-1]["original_line_start"]]).append(line_start)
+                prev_raw_lines = cleaned_lines
+                continue
+            if overlap > 0:
+                emitted_lines = cleaned_lines[overlap:]
+        cue_text = "\n".join(emitted_lines)
         entry = {"text": cue_text, "original_id": block[0] if timing_index else None,
                  "original_line_start": line_start, "original_line_end": line_start + len(block) - 1,
                  "start_seconds": start_seconds, "end_seconds": end_seconds}
-        if clean_youtube_vtt and cues and cues[-1]["text"] == cue_text and start_seconds <= cues[-1]["end_seconds"] + 1.0:
-            cues[-1]["end_seconds"] = max(cues[-1]["end_seconds"], end_seconds)
-            cues[-1].setdefault("collapsed_cue_lines", [cues[-1]["original_line_start"]]).append(line_start)
-            continue
         cues.append(entry)
+        prev_raw_lines = cleaned_lines
     body, kind, count, locators = cue_body(cues, locator_mode=locator_mode)
     return body, kind, count, locators, skipped_empty
 

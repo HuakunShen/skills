@@ -191,6 +191,44 @@ class NormalizeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'disagrees'):
             self.ingest([self.item(content=json.dumps(data), extension='json')])
 
+    def test_youtube_vtt_single_space_line_and_rolling_two_line_dedupe(self):
+        vtt = (
+            "WEBVTT\nKind: captions\nLanguage: en\n\n"
+            "00:00:00.760 --> 00:00:02.149 align:start position:0%\n"
+            " \n"
+            "hey<00:00:00.919><c> everyone</c><00:00:01.199><c> welcome</c>\n\n"
+            "00:00:02.149 --> 00:00:02.159 align:start position:0%\n"
+            "hey everyone welcome\n"
+            " \n\n"
+            "00:00:02.159 --> 00:00:04.630 align:start position:0%\n"
+            "hey everyone welcome\n"
+            "to<00:00:02.500><c> the</c><00:00:03.000><c> show</c>\n\n"
+            "00:00:04.630 --> 00:00:04.640 align:start position:0%\n"
+            "to the show\n"
+            " \n\n"
+            "00:00:04.640 --> 00:00:07.150 align:start position:0%\n"
+            "to the show\n"
+            "today<00:00:05.000><c> we</c><00:00:05.500><c> discuss</c>\n\n"
+            "00:00:07.150 --> 00:00:07.160 align:start position:0%\n"
+            " \n\n"
+            "00:00:12.000 --> 00:00:14.000 align:start position:0%\n"
+            "today we discuss\n"
+        )
+        # Must parse without Malformed VTT error even when clean_youtube_vtt=False.
+        self.ingest([self.item('raw_vtt', vtt, 'vtt')], clean_youtube_vtt=False)
+        raw_loc = json.loads((self.run / 'sources/raw_vtt.locators.json').read_text())
+        self.assertEqual(len(raw_loc['locators']), 6)
+        self.assertEqual(raw_loc['skipped_empty_cues'], 1)
+        # With clean_youtube_vtt=True, 2-line rolling duplicates collapse to 1 per line,
+        # while the genuine repeat after a >1s pause (at 12.0s) is preserved.
+        self.ingest([self.item('clean_vtt', vtt, 'vtt')], clean_youtube_vtt=True)
+        clean_md = (self.run / 'sources/clean_vtt.md').read_text()
+        clean_loc = json.loads((self.run / 'sources/clean_vtt.locators.json').read_text())
+        self.assertEqual(len(clean_loc['locators']), 4)
+        self.assertEqual(clean_md.count('hey everyone welcome'), 1)
+        self.assertEqual(clean_md.count('to the show'), 1)
+        self.assertEqual(clean_md.count('today we discuss'), 2)
+
     def test_binary_and_size_limits_prevent_text_mistakes(self):
         with self.assertRaisesRegex(ValueError, 'binary or empty'):
             self.ingest([self.item(content=b'RIFF\x00\x00audio')])

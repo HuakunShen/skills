@@ -580,8 +580,14 @@ def parser():
     rep.add_argument("--out", default="reports/report-data.json")
     rep.add_argument("--metrics", default="reports/metrics.json")
     rep.add_argument("--coverage", default="coverage.json")
+    rep.add_argument("--rubric", help="Optional custom rubric JSON path (defaults to assets/evaluation-rubric.json)")
     rep.add_argument("--title")
     rep.add_argument("--synthetic", action="store_true")
+    rhash = commands.add_parser("report-hashes", help="Print exact data_hash and rubric_hash required by Phase 7 model reviews before build-report-data")
+    rhash.add_argument("--run", required=True)
+    rhash.add_argument("--metrics", default="reports/metrics.json")
+    rhash.add_argument("--coverage", default="coverage.json")
+    rhash.add_argument("--rubric", help="Optional custom rubric JSON path (defaults to assets/evaluation-rubric.json)")
     hexp = commands.add_parser("handoff-export", help="Export a self-contained external AI handoff packet")
     hexp.add_argument("--run", required=True)
     hexp.add_argument("--task-ids", nargs="+", required=True)
@@ -615,7 +621,9 @@ def main(argv=None):
         elif args.command == "assess":
             output = pipeline.new_assessment_round(sys.modules[__name__], args.run, args.as_of, args.reason)
         elif args.command == "build-report-data":
-            output = pipeline.build_report_data(sys.modules[__name__], args.run, args.out, args.metrics, args.coverage, args.title, args.synthetic)
+            output = pipeline.build_report_data(sys.modules[__name__], args.run, args.out, args.metrics, args.coverage, args.title, args.synthetic, rubric_path=args.rubric)
+        elif args.command == "report-hashes":
+            output = pipeline.report_hashes(sys.modules[__name__], args.run, args.metrics, args.coverage, rubric_path=args.rubric)
         elif args.command == "handoff-export":
             output = pipeline.handoff_export(sys.modules[__name__], args.run, args.task_ids, args.packet_id)
         elif args.command == "handoff-import":

@@ -221,7 +221,7 @@
         "model_id": "a",
         "model_version": "synthetic-manual",
         "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-        "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
+        "rubric_hash": "b6cec0a1b4a4f0bc4a95903dc2d1e668a7f246f22cf86c0bdf3073525a425aac",
         "score_scale": {
           "min": 0,
           "max": 10
@@ -329,7 +329,7 @@
         "model_id": "b",
         "model_version": "synthetic-manual",
         "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-        "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
+        "rubric_hash": "b6cec0a1b4a4f0bc4a95903dc2d1e668a7f246f22cf86c0bdf3073525a425aac",
         "score_scale": {
           "min": 0,
           "max": 10
@@ -435,7 +435,7 @@
         "model_id": "c",
         "model_version": "synthetic-manual",
         "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-        "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
+        "rubric_hash": "b6cec0a1b4a4f0bc4a95903dc2d1e668a7f246f22cf86c0bdf3073525a425aac",
         "score_scale": {
           "min": 0,
           "max": 10
@@ -541,7 +541,7 @@
       "status": "completed",
       "model_id": "j",
       "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-      "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
+      "rubric_hash": "b6cec0a1b4a4f0bc4a95903dc2d1e668a7f246f22cf86c0bdf3073525a425aac",
       "score_scale": {
         "min": 0,
         "max": 10

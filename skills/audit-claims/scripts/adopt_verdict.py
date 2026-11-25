@@ -394,6 +394,97 @@ def reopen(run, claim_id, reason, actor, note="", refreeze=False):
         return {"reopened": True, "claim_id": claim_id, "prior_decision_sha256": prior_sha, "lifecycle": reopened["lifecycle"]}
 
 
+def set_evidence_quality(run, claim_id, directness, independence, traceability, rationale="", exception_reason=None):
+    import score_claims as scoring
+    scores = {}
+    for name, raw in (("directness", directness), ("independence", independence), ("traceability", traceability)):
+        if not common.finite_number(raw) or raw not in (0, 0.5, 1):
+            raise ValueError(f"evidence_quality.{name} must be 0, 0.5, or 1")
+        scores[name] = int(raw) if raw in (0, 1) else 0.5
+    if exception_reason is not None and not panel.nonempty(exception_reason):
+        raise ValueError("exception_reason must be a nonempty string when provided")
+    run = Path(run).resolve()
+    with audit.coordinator_lock(run):
+        claims = rows_by_id(run, "claims.jsonl", "claim_id")
+        if claim_id not in claims:
+            raise ValueError("Unknown claim_id")
+        claim = claims[claim_id]
+        if claim.get("acceptance"):
+            raise ValueError("Cannot modify evidence_quality after verdict adoption; use `reopen` first")
+        candidate = copy.deepcopy(claim)
+        quality = dict(scores)
+        if panel.nonempty(rationale):
+            quality["rationale"] = rationale.strip()
+        candidate["evidence_quality"] = quality
+        if exception_reason is not None:
+            candidate["evidence_exception"] = {"reviewed": True, "reason": exception_reason.strip()}
+        scoring.validate_claim(candidate)
+        claims[claim_id] = candidate
+        audit.write_jsonl(run / "claims.jsonl", list(claims.values()))
+        audit.event(run, "evidence_quality_set", claim_id=claim_id, evidence_quality=quality,
+                    has_exception=exception_reason is not None)
+        return {"updated": True, "claim_id": claim_id, "evidence_quality": quality,
+                "evidence_exception": candidate.get("evidence_exception")}
+
+
+def mark_trigger_unmet(run, claim_id, evidence_ids, note="", strict_freeze_order=False):
+    import score_claims as scoring
+    panel.strings(evidence_ids, "evidence_ids", nonempty_list=True)
+    run = Path(run).resolve()
+    with audit.coordinator_lock(run):
+        cfg = run_config(run)
+        claims = rows_by_id(run, "claims.jsonl", "claim_id")
+        if claim_id not in claims:
+            raise ValueError("Unknown claim_id")
+        claim = claims[claim_id]
+        if claim.get("acceptance") or claim.get("lifecycle") == "resolved":
+            raise ValueError("Resolved/adopted claim cannot be marked trigger_unmet; use `reopen` first")
+        if claim.get("criteria") is None:
+            raise ValueError("Frozen operational criteria are required before recording trigger_unmet")
+        definition = claim["criteria"]["definition"]
+        is_conditional = (
+            claim.get("verifiability") == "conditional"
+            or definition.get("condition") not in (None, "", "unconditional")
+        )
+        if not is_conditional:
+            raise ValueError("Only conditional claims can be marked trigger_unmet")
+        bindings, ev_meta = evidence_bindings(
+            run, claim_id, evidence_ids, cfg,
+            criteria_timezone=definition["timezone"],
+            frozen_at=claim["criteria"].get("frozen_at"),
+            verdict=None,
+            strict_freeze_order=strict_freeze_order,
+        )
+        history_path, _ = immutable_json(run, "history/claims", claim)
+        candidate = copy.deepcopy(claim)
+        merged_ev = sorted(set(candidate.get("evidence_ids") or []) | set(bindings))
+        candidate.update(
+            lifecycle="pending",
+            due_for_assessment=False,
+            outcome=None,
+            event_occurred=None,
+            reason="trigger_unmet",
+            evidence_ids=merged_ev,
+            trigger_assessment={
+                "state": "unmet",
+                "assessed_at": audit.now(),
+                "evidence_ids": sorted(bindings),
+                "evidence_bindings": bindings,
+                "history_path": history_path,
+                "post_hoc_criteria": ev_meta["post_hoc_criteria"],
+                "note": note,
+            },
+        )
+        scoring.validate_claim(candidate)
+        claims[claim_id] = candidate
+        audit.write_jsonl(run / "claims.jsonl", list(claims.values()))
+        audit.event(run, "trigger_unmet_recorded", claim_id=claim_id, evidence_ids=sorted(bindings),
+                    history_path=history_path, note=note)
+        return {"marked": True, "claim_id": claim_id, "lifecycle": candidate["lifecycle"],
+                "due_for_assessment": candidate["due_for_assessment"], "reason": candidate["reason"],
+                "evidence_ids": candidate["evidence_ids"], "history_path": history_path}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -405,6 +496,20 @@ def main(argv=None):
             command.add_argument("--consensus", required=True)
             command.add_argument("--policy")
             command.add_argument("--strict-freeze-order", action="store_true")
+    eq_cmd = sub.add_parser("set-evidence-quality", help="Set coordinator evidence_quality scores (0, 0.5, 1) on a claim before adoption")
+    eq_cmd.add_argument("--run", required=True)
+    eq_cmd.add_argument("--claim-id", required=True)
+    eq_cmd.add_argument("--directness", type=float, required=True, choices=[0.0, 0.5, 1.0])
+    eq_cmd.add_argument("--independence", type=float, required=True, choices=[0.0, 0.5, 1.0])
+    eq_cmd.add_argument("--traceability", type=float, required=True, choices=[0.0, 0.5, 1.0])
+    eq_cmd.add_argument("--rationale", default="", help="Justification for the evidence quality scores")
+    eq_cmd.add_argument("--exception-reason", help="Reviewed exception reason when any quality axis is 0")
+    unmet_cmd = sub.add_parser("mark-trigger-unmet", help="Record post-lookup trigger_unmet for a conditional claim linked to trigger evidence")
+    unmet_cmd.add_argument("--run", required=True)
+    unmet_cmd.add_argument("--claim-id", required=True)
+    unmet_cmd.add_argument("--evidence-ids", nargs="+", required=True, help="Evidence ID(s) in evidence.jsonl proving the trigger condition was not met")
+    unmet_cmd.add_argument("--note", default="", help="Optional explanatory note on trigger evaluation")
+    unmet_cmd.add_argument("--strict-freeze-order", action="store_true", help="Reject trigger evidence retrieved before criteria were frozen")
     reopen_cmd = sub.add_parser("reopen", help="Reopen an adopted verdict with immutable history and audit log")
     reopen_cmd.add_argument("--run", required=True)
     reopen_cmd.add_argument("--claim-id", required=True)
@@ -417,6 +522,12 @@ def main(argv=None):
         run = Path(args.run).resolve()
         if args.command == "reopen":
             result = reopen(run, args.claim_id, args.reason, args.actor, args.note, args.refreeze)
+        elif args.command == "set-evidence-quality":
+            result = set_evidence_quality(run, args.claim_id, args.directness, args.independence, args.traceability,
+                                          rationale=args.rationale, exception_reason=args.exception_reason)
+        elif args.command == "mark-trigger-unmet":
+            result = mark_trigger_unmet(run, args.claim_id, args.evidence_ids, note=args.note,
+                                        strict_freeze_order=args.strict_freeze_order)
         elif args.command == "fingerprint":
             claim = rows_by_id(run, "claims.jsonl", "claim_id")[args.claim_id]
             result = {"claim_id": args.claim_id, "input_hash": verification_fingerprint(run, claim)}

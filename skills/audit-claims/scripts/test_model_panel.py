@@ -216,6 +216,16 @@ class ModelPanelTests(unittest.TestCase):
         long_pol['verification'] = {'mode': 'human', 'required_reviewers': [], 'judge_model_id': None}
         self.assertTrue(panel.validate_policy(long_pol)['valid'])
 
+    def test_cli_help_clarifies_jsonl_and_array_error_mentions_jsonl(self):
+        p = panel.parser()
+        sub_actions = {a.dest: a for a in p._subparsers._group_actions}['command'].choices
+        self.assertIn('JSONL', sub_actions['summarize'].format_help())
+        self.assertIn('JSONL', sub_actions['consensus'].format_help())
+        arr_path = self.run / 'array.json'
+        arr_path.write_text('[{"a": 1}]\n', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'JSONL'):
+            panel.read_rows(arr_path)
+
 
 if __name__ == '__main__':
     unittest.main()

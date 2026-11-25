@@ -317,6 +317,156 @@ class AuditRunTests(unittest.TestCase):
             imp = pipeline.handoff_import(audit, self.run, 'pkt1', ret)
             self.assertEqual(imp['imported_tasks'], [t2['task_id']])
 
+    def test_merge_extraction_preserves_optional_fields_and_blocks_forged_verdicts(self):
+        import audit_pipeline as pipeline
+        self.sources([self.source('s1', text='[#cue-000001 10-15s]\nBitcoin might hit 120k.\n')])
+        self.plan(budget=2000, max_items=10)
+        task = self.task()
+        shard = {
+            'task_id': task['task_id'], 'input_fingerprint': task['input_fingerprint'],
+            'complete': True, 'processed_source_ids': ['s1'],
+            'claims': [{
+                'claim_id': 'clm_opt_1', 'text': 'Hypothetical BTC 120k scenario',
+                'claim_type': 'hypothetical', 'empirical': False, 'verifiability': 'unverifiable',
+                'lifecycle': 'unscorable', 'reason': 'hypothetical_scenario',
+                'certainty_text': 'dubious speculation', 'first_stated_at': '2025-01-07T00:08:56+00:00',
+                'supersedes': ['clm_old_0'], 'next_check_at': '2026-01-01T00:00:00+00:00',
+                'family_id': 'fam_btc_hyp',
+                # Protected fields that an extraction shard must not be able to forge:
+                'outcome': 'supported', 'evidence_ids': ['ev_forged'], 'acceptance': {'decision_path': 'x'},
+                'occurrences': [{'source_id': 's1', 'original_quote': 'Bitcoin might hit 120k.',
+                                 'locator': {'kind': 'cue', 'unit_id': 'cue-000001', 'start': 10.0, 'end': 15.0}}],
+            }],
+        }
+        res_rel = f"work/results/{task['task_id']}.json"
+        audit.write_json(self.run / res_rel, shard)
+        audit.checkpoint(Namespace(run=str(self.run), task_id=task['task_id'], status='completed', result=res_rel, note=None))
+        pipeline.merge_extraction(audit, self.run)
+        merged_claim = audit.read_jsonl(self.run / 'claims.jsonl')[0]
+        self.assertEqual(merged_claim['reason'], 'hypothetical_scenario')
+        self.assertEqual(merged_claim['certainty_text'], 'dubious speculation')
+        self.assertEqual(merged_claim['first_stated_at'], '2025-01-07T00:08:56+00:00')
+        self.assertEqual(merged_claim['supersedes'], ['clm_old_0'])
+        self.assertEqual(merged_claim['next_check_at'], '2026-01-01T00:00:00+00:00')
+        self.assertEqual(merged_claim['family_id'], 'fam_btc_hyp')
+        self.assertIsNone(merged_claim['outcome'])
+        self.assertEqual(merged_claim['evidence_ids'], [])
+        self.assertNotIn('acceptance', merged_claim)
+
+    def test_build_report_data_no_20_truncation_loads_rationale_quotes_and_hashes(self):
+        import audit_pipeline as pipeline
+        self.sources([self.source('s1', text='Source text')])
+        audit.write_jsonl(self.run / 'evidence.jsonl', [
+            {'evidence_id': 'ev1', 'title': 'Primary data', 'source_url': 'https://example.test/ev1',
+             'published_at': '2025-01-02', 'excerpt': 'Observed value 4.1%.'},
+        ])
+        dec_rel = 'reviews/decisions/dec_late.json'
+        audit.write_json(self.run / dec_rel, {
+            'schema_version': 1,
+            'consensus': {
+                'decision': None,
+                'votes': [{'reviewer_id': 'm1', 'rationale': 'Verified directly against primary data at index 23.'}],
+            },
+        })
+        claims = []
+        occs = []
+        # Create 22 filler unscorable non-hypothetical claims first so resolved/notable claims sit past index 19.
+        for i in range(22):
+            cid, oid = f'clm_filler_{i:02d}', f'occ_filler_{i:02d}'
+            claims.append({
+                'schema_version': 1, 'claim_id': cid, 'subject_id': 'Example speaker',
+                'occurrence_ids': [oid], 'text': f'General value judgment {i}', 'domain': 'general',
+                'claim_type': 'value_judgment', 'empirical': False, 'endorsement': 'endorsed',
+                'attribution_confidence': 'high', 'accountability_eligible': False,
+                'quantifiability': 'none', 'verifiability': 'unverifiable',
+                'lifecycle': 'unscorable', 'outcome': None, 'due_for_assessment': False,
+                'evaluation_mode': 'none', 'probability': None, 'probability_origin': 'none',
+                'event_occurred': None, 'criteria': None, 'evidence_ids': [],
+                'evidence_quality': None, 'review_state': 'unreviewed',
+            })
+            occs.append({
+                'schema_version': 1, 'occurrence_id': oid, 'claim_id': cid, 'source_id': 's1',
+                'speaker': 'Example speaker', 'original_quote': f'Quote {i}',
+                'context_before': '', 'context_after': '', 'locator': {'kind': 'cue', 'start': float(i * 10), 'end': float(i * 10 + 5)},
+                'endorsement': 'endorsed', 'language': 'en',
+            })
+        # Index 22: resolved claim with decision rationale.
+        claims.append({
+            'schema_version': 1, 'claim_id': 'clm_resolved_late', 'subject_id': 'Example speaker',
+            'occurrence_ids': ['occ_resolved_late'], 'text': 'Resolved late claim past index 20', 'domain': 'macro',
+            'claim_type': 'prediction', 'empirical': True, 'endorsement': 'endorsed',
+            'attribution_confidence': 'high', 'accountability_eligible': True,
+            'quantifiability': 'numeric', 'verifiability': 'verifiable',
+            'lifecycle': 'resolved', 'outcome': 'supported', 'due_for_assessment': True,
+            'evaluation_mode': 'categorical', 'probability': None, 'probability_origin': 'none',
+            'event_occurred': None, 'criteria': None, 'evidence_ids': ['ev1'],
+            'evidence_quality': None, 'review_state': 'accepted',
+            'acceptance': {'decision_path': dec_rel, 'decision_sha256': '0' * 64, 'policy_hash': 'p'},
+        })
+        occs.append({
+            'schema_version': 1, 'occurrence_id': 'occ_resolved_late', 'claim_id': 'clm_resolved_late', 'source_id': 's1',
+            'speaker': 'Example speaker', 'original_quote': 'Exact late quote from video.',
+            'context_before': '', 'context_after': '',
+            'locator': {'kind': 'cue', 'start': 73.08, 'end': 80.6, 'start_unit': 'cue-000031', 'end_unit': 'cue-000032'},
+            'endorsement': 'endorsed', 'language': 'en',
+        })
+        # Index 23: pending trigger_unmet claim.
+        claims.append({
+            'schema_version': 1, 'claim_id': 'clm_pending_unmet', 'subject_id': 'Example speaker',
+            'occurrence_ids': ['occ_pending_unmet'], 'text': 'Conditional claim with unmet trigger', 'domain': 'macro',
+            'claim_type': 'prediction', 'empirical': True, 'endorsement': 'endorsed',
+            'attribution_confidence': 'high', 'accountability_eligible': True,
+            'quantifiability': 'operationalizable', 'verifiability': 'conditional',
+            'lifecycle': 'pending', 'reason': 'trigger_unmet', 'outcome': None, 'due_for_assessment': False,
+            'evaluation_mode': 'categorical', 'probability': None, 'probability_origin': 'none',
+            'event_occurred': None, 'criteria': {'definition': {'condition': {'trigger': 'UNRATE == 4.3%'}}},
+            'evidence_ids': ['ev1'], 'evidence_quality': None, 'review_state': 'unreviewed',
+        })
+        occs.append({
+            'schema_version': 1, 'occurrence_id': 'occ_pending_unmet', 'claim_id': 'clm_pending_unmet', 'source_id': 's1',
+            'speaker': 'Example speaker', 'original_quote': 'If unemployment is 4.3 percent we chop.',
+            'context_before': '', 'context_after': '',
+            'locator': {'kind': 'cue', 'start': 125.0, 'end': 132.0}, 'endorsement': 'endorsed', 'language': 'en',
+        })
+        # Index 24: unscorable hypothetical claim.
+        claims.append({
+            'schema_version': 1, 'claim_id': 'clm_hyp_late', 'subject_id': 'Example speaker',
+            'occurrence_ids': ['occ_hyp_late'], 'text': 'Hypothetical 120k scenario', 'domain': 'crypto',
+            'claim_type': 'hypothetical', 'empirical': False, 'endorsement': 'endorsed',
+            'attribution_confidence': 'high', 'accountability_eligible': False,
+            'quantifiability': 'numeric', 'verifiability': 'unverifiable',
+            'lifecycle': 'unscorable', 'reason': 'hypothetical_scenario', 'outcome': None, 'due_for_assessment': False,
+            'evaluation_mode': 'none', 'probability': None, 'probability_origin': 'none',
+            'event_occurred': None, 'criteria': None, 'evidence_ids': [],
+            'evidence_quality': None, 'review_state': 'unreviewed',
+        })
+        occs.append({
+            'schema_version': 1, 'occurrence_id': 'occ_hyp_late', 'claim_id': 'clm_hyp_late', 'source_id': 's1',
+            'speaker': 'Example speaker', 'original_quote': 'This is dubious speculation not the base case.',
+            'context_before': '', 'context_after': '',
+            'locator': {'kind': 'cue', 'start': 610.0, 'end': 620.0}, 'endorsement': 'endorsed', 'language': 'en',
+        })
+        audit.write_jsonl(self.run / 'claims.jsonl', claims)
+        audit.write_jsonl(self.run / 'occurrences.jsonl', occs)
+        audit.write_json(self.run / 'coverage.json', {
+            'schema_version': 1, 'eligible_sources': 1, 'acquired_sources': 1,
+            'extracted_sources': 1, 'inventory_complete': True, 'unresolved_review_issues': 0,
+        })
+        hashes = pipeline.report_hashes(audit, self.run)
+        built = pipeline.build_report_data(audit, self.run)
+        self.assertEqual(hashes['data_hash'], built['data_hash'])
+        self.assertEqual(hashes['rubric_hash'], built['rubric_hash'])
+        report_data = audit.read_json(self.run / 'reports/report-data.json')
+        by_cid = {c['id']: c for c in report_data['cases']}
+        self.assertEqual(set(by_cid), {'clm_resolved_late', 'clm_pending_unmet', 'clm_hyp_late'})
+        self.assertEqual(by_cid['clm_resolved_late']['assessment'], 'Verified directly against primary data at index 23.')
+        self.assertEqual(by_cid['clm_resolved_late']['original_quote'], 'Exact late quote from video.')
+        self.assertIn('01:13–01:21', by_cid['clm_resolved_late']['timestamps'])
+        self.assertEqual(by_cid['clm_pending_unmet']['status'], 'pending')
+        self.assertIn('UNRATE == 4.3%', by_cid['clm_pending_unmet']['assessment'])
+        self.assertEqual(by_cid['clm_hyp_late']['status'], 'not_checked')
+        self.assertEqual(by_cid['clm_hyp_late']['evidence_ids'], ['s1'])
+
     def _write_manifest(self, inp, filename):
         m = inp / 'manifest.jsonl'
         audit.write_jsonl(m, [{'source_id': 's1', 'title': 'Long', 'source_url': None,

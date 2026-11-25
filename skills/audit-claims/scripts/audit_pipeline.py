@@ -17,6 +17,16 @@ from zoneinfo import ZoneInfo
 import _common as common
 
 UNIT_HEADER = re.compile(r"^(?:\[#((?:p|cue)-\d{6})[^\]]*\]|<!--\s*audit-claims-locator:\s*(\{.*?\})\s*-->)\n", re.MULTILINE)
+DEFAULT_RUBRIC_PATH = Path(__file__).resolve().parent.parent / "assets/evaluation-rubric.json"
+EXTRACTION_PROTECTED_CLAIM_FIELDS = frozenset({
+    "occurrences", "occurrence", "outcome", "resolved_at", "acceptance",
+    "evidence_ids", "evidence_quality", "evidence_exception",
+    "accountability_eligible", "due_for_assessment", "event_occurred",
+    "reopen_history", "quote_verified", "trigger_assessment",
+})
+OPTIONAL_OCCURRENCE_FIELDS = (
+    "technical_duplicate_of", "raw_locator", "normalized_locator", "transcript_uncertain",
+)
 
 
 def _extract_frontmatter_and_units(text):
@@ -278,6 +288,9 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                             "language": raw_occ.get("language") or sources[sid].get("language") or "unknown",
                             "quote_verified": ok, "quote_match_basis": match_reason,
                         }
+                        for opt_key in OPTIONAL_OCCURRENCE_FIELDS:
+                            if opt_key in raw_occ and raw_occ[opt_key] is not None:
+                                occ_rec[opt_key] = raw_occ[opt_key]
                         occ_by_id[oid] = occ_rec
                         occurrences.append(occ_rec)
                         added_occ += 1
@@ -309,8 +322,15 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                         "review_state": "needs_review" if not all_quotes_ok else raw_claim.get("review_state", "unreviewed"),
                         "quote_verified": all_quotes_ok,
                     }
-                    if raw_claim.get("family_id"):
-                        c_rec["family_id"] = raw_claim["family_id"]
+                    # Preserve optional schema fields (reason, certainty_text, first_stated_at,
+                    # supersedes, next_check_at, family_id, operationalization_status, etc.)
+                    # while blocking shards from forging post-adjudication fields.
+                    for key, value in raw_claim.items():
+                        if key in c_rec or key in EXTRACTION_PROTECTED_CLAIM_FIELDS or value is None:
+                            continue
+                        if key == "family_id" and not value:
+                            continue
+                        c_rec[key] = value
                     claim_by_id[cid] = c_rec
                     claims.append(c_rec)
                     added_claims += 1
@@ -401,6 +421,8 @@ def new_assessment_round(ledger, run, new_as_of, reason="scheduled_reassessment"
         updated_due = 0
         for c in claims:
             if c.get("accountability_eligible") and c.get("criteria") and c.get("lifecycle") in {"pending", "ready"}:
+                if c.get("reason") == "trigger_unmet" or (c.get("trigger_assessment") or {}).get("state") == "unmet":
+                    continue
                 defn = c["criteria"]["definition"]
                 end = defn.get("window_end")
                 due = True if not end else ledger.as_of_time(end, ZoneInfo(defn["timezone"])) <= as_of_dt
@@ -414,19 +436,120 @@ def new_assessment_round(ledger, run, new_as_of, reason="scheduled_reassessment"
         return {"as_of": cfg["scope"]["as_of"], "config_hash": cfg["config_hash"], "newly_due_claims": updated_due}
 
 
+def _resolve_rubric(rubric_path=None):
+    path = Path(rubric_path).resolve() if rubric_path else DEFAULT_RUBRIC_PATH
+    rubric = common.read_json(path)
+    return path, rubric, common.digest(rubric)
+
+
+def _format_seconds_clock(value):
+    total = int(round(float(value)))
+    hours, rem = divmod(max(0, total), 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+def _format_locator(locator):
+    if not isinstance(locator, dict):
+        return ""
+    kind = locator.get("kind") or ""
+    start, end = locator.get("start"), locator.get("end")
+    parts = []
+    if kind in {"cue", "timestamp"} and common.finite_number(start):
+        span = _format_seconds_clock(start)
+        if common.finite_number(end):
+            span += "–" + _format_seconds_clock(end)
+        parts.append(span)
+    elif start is not None:
+        span = f"{kind} {start}".strip()
+        if end is not None and end != start:
+            span += f"–{end}"
+        parts.append(span)
+    start_u = locator.get("start_unit") or locator.get("unit_id") or locator.get("id")
+    end_u = locator.get("end_unit")
+    if start_u:
+        unit_span = f"{start_u}–{end_u}" if end_u and end_u != start_u else str(start_u)
+        parts.append(unit_span)
+    return " · ".join(parts)
+
+
+def _extract_decision_rationale(ledger, run, claim):
+    acceptance = claim.get("acceptance")
+    if isinstance(acceptance, dict) and common.nonempty(acceptance.get("decision_path")):
+        try:
+            dec_path = ledger.inside(run, acceptance["decision_path"])
+            if dec_path.is_file():
+                artifact = common.read_json(dec_path)
+                cons = artifact.get("consensus") or {}
+                dec = cons.get("decision")
+                if isinstance(dec, dict) and common.nonempty(dec.get("rationale")):
+                    return dec["rationale"].strip()
+                votes = cons.get("votes") or []
+                vote_rationales = []
+                seen = set()
+                for vote in votes:
+                    rat = (vote.get("rationale") or "").strip() if isinstance(vote, dict) else ""
+                    if rat and rat not in seen:
+                        seen.add(rat)
+                        rid = vote.get("reviewer_id")
+                        vote_rationales.append((rid, rat))
+                if len(vote_rationales) == 1:
+                    return vote_rationales[0][1]
+                if len(vote_rationales) > 1:
+                    return "; ".join(f"[{rid}] {rat}" if rid else rat for rid, rat in vote_rationales)
+        except (ValueError, OSError, KeyError, TypeError):
+            pass
+    return f"lifecycle={claim['lifecycle']}, mode={claim['evaluation_mode']}"
+
+
+def _compute_report_inputs(ledger, run, metrics_path="reports/metrics.json", coverage_path="coverage.json", rubric_path=None):
+    metrics_file = ledger.inside(run, metrics_path)
+    cov_file = ledger.inside(run, coverage_path)
+    metrics = common.read_json(metrics_file) if metrics_file.exists() else None
+    coverage = common.read_json(cov_file) if cov_file.exists() else {}
+    claims = ledger.read_jsonl(run / "claims.jsonl")
+    r_path, rubric, rubric_hash = _resolve_rubric(rubric_path)
+    data_hash = common.digest({"claims": claims, "coverage": coverage, "metrics": metrics})
+    return {
+        "metrics": metrics, "metrics_present": metrics_file.exists(),
+        "coverage": coverage, "coverage_present": cov_file.exists(),
+        "claims": claims, "rubric": rubric, "rubric_path": str(r_path),
+        "rubric_hash": rubric_hash, "data_hash": data_hash,
+    }
+
+
+def report_hashes(ledger, run, metrics_path="reports/metrics.json", coverage_path="coverage.json", rubric_path=None):
+    run = Path(run).resolve()
+    with ledger.coordinator_lock(run):
+        ledger.config(run)
+        computed = _compute_report_inputs(ledger, run, metrics_path, coverage_path, rubric_path)
+        return {
+            "data_hash": computed["data_hash"],
+            "rubric_hash": computed["rubric_hash"],
+            "rubric_path": computed["rubric_path"],
+            "score_scale": computed["rubric"].get("scale"),
+            "claims_count": len(computed["claims"]),
+            "metrics_present": computed["metrics_present"],
+            "coverage_present": computed["coverage_present"],
+        }
+
+
 def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_path="reports/metrics.json",
-                      coverage_path="coverage.json", title=None, synthetic=False):
+                      coverage_path="coverage.json", title=None, synthetic=False, rubric_path=None):
     import model_panel as panel
     run = Path(run).resolve()
     with ledger.coordinator_lock(run):
         cfg = ledger.config(run)
-        metrics_file = ledger.inside(run, metrics_path)
-        cov_file = ledger.inside(run, coverage_path)
-        metrics = common.read_json(metrics_file) if metrics_file.exists() else None
-        coverage = common.read_json(cov_file) if cov_file.exists() else {}
-        claims = ledger.read_jsonl(run / "claims.jsonl")
+        computed = _compute_report_inputs(ledger, run, metrics_path, coverage_path, rubric_path)
+        metrics = computed["metrics"]
+        coverage = computed["coverage"]
+        claims = computed["claims"]
+        rubric = computed["rubric"]
+        data_hash = computed["data_hash"]
         sources_rows = ledger.read_jsonl(run / "sources.jsonl")
         evidence_rows = ledger.read_jsonl(run / "evidence.jsonl")
+        occurrences_rows = ledger.read_jsonl(run / "occurrences.jsonl") if (run / "occurrences.jsonl").exists() else []
+        occ_by_id = {o["occurrence_id"]: o for o in occurrences_rows if isinstance(o, dict) and o.get("occurrence_id")}
         costs_rows = ledger.read_jsonl(run / "costs.jsonl") if (run / "costs.jsonl").exists() else []
         est_usd = sum(r.get("estimated_usd") or 0 for r in costs_rows) if costs_rows else None
         obs_vals = [r["actual_usd"] for r in costs_rows if r.get("actual_usd") is not None]
@@ -454,14 +577,81 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 "locator": e.get("local_path") or e.get("source_family") or "", "excerpt": e.get("excerpt") or "",
             })
         cases = []
-        for c in claims[:20]:
-            if c.get("lifecycle") == "resolved":
-                cases.append({
-                    "title": c["text"][:80], "claim": c["text"],
-                    "status": c.get("outcome") or "not_checked",
-                    "assessment": f"lifecycle={c['lifecycle']}, mode={c['evaluation_mode']}",
-                    "evidence_ids": [eid for eid in c.get("evidence_ids", []) if eid in seen_sids],
+        for c in claims:
+            lifecycle = c.get("lifecycle")
+            is_resolved = lifecycle == "resolved"
+            is_notable_pending = lifecycle == "pending" and (
+                c.get("reason") == "trigger_unmet" or c.get("criteria") is not None
+            )
+            is_notable_hypothetical = lifecycle == "unscorable" and c.get("claim_type") == "hypothetical"
+            if not (is_resolved or is_notable_pending or is_notable_hypothetical):
+                continue
+            occ_details = []
+            occ_source_ids = []
+            for oid in c.get("occurrence_ids") or []:
+                occ = occ_by_id.get(oid)
+                if not occ:
+                    continue
+                ts = _format_locator(occ.get("locator"))
+                occ_details.append({
+                    "occurrence_id": oid,
+                    "source_id": occ.get("source_id"),
+                    "original_quote": occ.get("original_quote") or "",
+                    "locator": occ.get("locator"),
+                    "timestamp": ts,
                 })
+                if occ.get("source_id") in seen_sids and occ["source_id"] not in occ_source_ids:
+                    occ_source_ids.append(occ["source_id"])
+            first_quote = next((o["original_quote"] for o in occ_details if o["original_quote"]), None)
+            timestamps = [o["timestamp"] for o in occ_details if o["timestamp"]]
+            ts_summary = ", ".join(dict.fromkeys(timestamps))
+            if is_resolved:
+                status = c.get("outcome") or "not_checked"
+                assessment = _extract_decision_rationale(ledger, run, c)
+            elif is_notable_pending:
+                status = "pending"
+                if c.get("reason") == "trigger_unmet":
+                    trig_note = ((c.get("trigger_assessment") or {}).get("note") or "").strip()
+                    cond = ((c.get("criteria") or {}).get("definition") or {}).get("condition")
+                    cond_text = cond.get("trigger") if isinstance(cond, dict) else (cond if isinstance(cond, str) else "")
+                    assessment = "Conditional trigger unmet (pending, not scored as error)."
+                    if cond_text:
+                        assessment += f" Condition: {cond_text}."
+                    if trig_note:
+                        assessment += f" {trig_note}"
+                else:
+                    reason = c.get("reason") or "not_yet_due"
+                    assessment = f"Pending assessment ({reason}; not scored as error)."
+            else:
+                status = "not_checked"
+                reason = c.get("reason") or "hypothetical_scenario"
+                assessment = f"Unscorable hypothetical scenario ({reason}); excluded from empirical accuracy denominators."
+            ev_ids = [eid for eid in c.get("evidence_ids", []) if eid in seen_sids]
+            if not ev_ids:
+                ev_ids = occ_source_ids
+            note_parts = [c["claim_id"], c.get("claim_type") or "claim"]
+            if c.get("reason"):
+                note_parts.append(f"reason={c['reason']}")
+            if ts_summary:
+                note_parts.append(ts_summary)
+            case_obj = {
+                "id": c["claim_id"],
+                "title": c["text"][:80],
+                "claim": c["text"],
+                "claim_type": c.get("claim_type"),
+                "lifecycle": lifecycle,
+                "status": status,
+                "assessment": assessment,
+                "evidence_ids": ev_ids,
+                "notes": " · ".join(note_parts),
+            }
+            if first_quote:
+                case_obj["original_quote"] = first_quote
+            if ts_summary:
+                case_obj["timestamps"] = ts_summary
+            if occ_details:
+                case_obj["occurrences"] = occ_details
+            cases.append(case_obj)
         panel_obj = None
         pol_path = run / "config/model-policy.json"
         rep_dir = run / "reviews/reports"
@@ -471,8 +661,21 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 pol = panel.load_policy(pol_path)
                 reviews = [common.read_json(f) for f in rep_files]
                 panel_obj = {"policy": pol, "reviews": reviews}
-        rubric = common.read_json(Path(__file__).resolve().parent.parent / "assets/evaluation-rubric.json")
-        data_hash = common.digest({"claims": claims, "coverage": coverage, "metrics": metrics})
+        summary_lines = [f"Total canonical claims: {len(claims)}."]
+        if isinstance(metrics, dict):
+            sr = metrics.get("strict_support_rate") or {}
+            if sr.get("denominator"):
+                summary_lines.append(
+                    f"Strict support rate: {sr['value'] * 100:.1f}% ({sr['numerator']}/{sr['denominator']} adjudicated categorical claims)."
+                )
+            by_type = metrics.get("by_claim_type") or {}
+            splits = []
+            for ctype in ("factual", "prediction"):
+                tsr = (by_type.get(ctype) or {}).get("strict_support_rate") or {}
+                if tsr.get("denominator"):
+                    splits.append(f"{ctype}: {tsr['value'] * 100:.1f}% ({tsr['numerator']}/{tsr['denominator']})")
+            if splits:
+                summary_lines.append("Claim-type split — " + "; ".join(splits) + ".")
         payload = {
             "schema_version": 1, "synthetic": bool(synthetic), "data_hash": data_hash,
             "rubric": rubric,
@@ -481,7 +684,7 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 "subject": cfg["subject"],
                 "period_start": cfg["scope"]["start"], "period_end": cfg["scope"]["end"],
                 "as_of": cfg["scope"]["as_of"][:10], "generated_at": common.now()[:10],
-                "summary": [f"Total canonical claims: {len(claims)}."],
+                "summary": summary_lines,
             },
             "metrics": metrics, "panel": panel_obj, "topics": [], "cases": cases,
             "coverage": coverage,
@@ -490,7 +693,8 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
         }
         target = ledger.inside(run, out_path)
         common.write_json(target, payload)
-        return {"report_data_path": str(target), "data_hash": data_hash, "cases": len(cases), "sources": len(report_sources)}
+        return {"report_data_path": str(target), "data_hash": data_hash, "rubric_hash": computed["rubric_hash"],
+                "cases": len(cases), "sources": len(report_sources)}
 
 
 def handoff_export(ledger, run, task_ids, packet_id=None):

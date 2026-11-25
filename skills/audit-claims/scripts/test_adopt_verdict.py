@@ -391,5 +391,54 @@ class AdoptionTests(unittest.TestCase):
             self.adopt()
 
 
+    def test_set_evidence_quality_cli_and_rejects_after_adoption(self):
+        self.claim['evidence_quality'] = None
+        audit.write_jsonl(self.run / 'claims.jsonl', [self.claim])
+        with redirect_stdout(io.StringIO()):
+            rc = bridge.main(['set-evidence-quality', '--run', str(self.run), '--claim-id', 'c1',
+                              '--directness', '1', '--independence', '0.5', '--traceability', '1',
+                              '--rationale', 'Primary release with single family.'])
+        self.assertEqual(rc, 0)
+        updated = self.adopted()
+        self.assertEqual(updated['evidence_quality'], {
+            'directness': 1, 'independence': 0.5, 'traceability': 1,
+            'rationale': 'Primary release with single family.',
+        })
+        # Now adoption succeeds without hand-editing claims.jsonl.
+        self.adopt()
+        # Mutating evidence_quality after adoption must fail unless reopened first.
+        with self.assertRaisesRegex(ValueError, 'after verdict adoption'):
+            bridge.set_evidence_quality(self.run, 'c1', 0.5, 0.5, 0.5)
+
+    def test_mark_trigger_unmet_links_evidence_preserves_history_and_survives_assess(self):
+        import audit_pipeline as pipeline
+        # Non-conditional claim must be rejected.
+        with self.assertRaisesRegex(ValueError, 'Only conditional'):
+            bridge.mark_trigger_unmet(self.run, 'c1', ['e-a'])
+        # Make c1 conditional with frozen criteria.
+        self.claim['verifiability'] = 'conditional'
+        self.claim['criteria']['definition']['condition'] = {'trigger': 'UNRATE == 4.3%'}
+        self.claim['criteria']['sha256'] = bridge.hashed(self.claim['criteria']['definition'])
+        audit.write_jsonl(self.run / 'claims.jsonl', [self.claim])
+        with redirect_stdout(io.StringIO()):
+            rc = bridge.main(['mark-trigger-unmet', '--run', str(self.run), '--claim-id', 'c1',
+                              '--evidence-ids', 'e-a', '--note', 'BLS printed 4.1% on Jan 10.'])
+        self.assertEqual(rc, 0)
+        c = self.adopted()
+        self.assertEqual(c['lifecycle'], 'pending')
+        self.assertIs(c['due_for_assessment'], False)
+        self.assertEqual(c['reason'], 'trigger_unmet')
+        self.assertEqual(c['evidence_ids'], ['e-a'])
+        self.assertEqual(c['trigger_assessment']['state'], 'unmet')
+        self.assertEqual(len(list((self.run / 'history/claims').glob('*.json'))), 1)
+        # Validate against score_claims and verify new_assessment_round keeps it pending/not due.
+        scoring.validate_claim(c)
+        round_res = pipeline.new_assessment_round(audit, self.run, '2026-06-01T00:00:00Z')
+        self.assertEqual(round_res['newly_due_claims'], 0)
+        c_after = self.adopted()
+        self.assertEqual(c_after['lifecycle'], 'pending')
+        self.assertIs(c_after['due_for_assessment'], False)
+
+
 if __name__ == '__main__':
     unittest.main()

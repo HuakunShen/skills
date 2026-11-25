@@ -270,6 +270,27 @@ class RenderReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'case.title'):
             renderer.validate_report(bad_case)
 
+    def test_english_lang_renders_english_rubric_labels_in_html_and_svg(self):
+        data = copy.deepcopy(self.data)
+        data['cases'][0]['original_quote'] = 'BTC <100k> "quote" check.'
+        page_en = renderer.render_report(data, lang='en')
+        radar_en = renderer.render_radar(data, standalone=True, lang='en')
+        panel_start = page_en.index('<section id="model-panel"')
+        panel_end = page_en.index('</section>', panel_start)
+        panel_en = page_en[panel_start:panel_end]
+        for dim in self.rubric['dimensions']:
+            self.assertIn('label_en', dim)
+            self.assertIn('description_en', dim)
+            self.assertIn(dim['label_en'], panel_en)
+            self.assertNotIn(dim['label'], panel_en)
+            self.assertIn(f'<title>{dim["label_en"]}</title>', radar_en)
+            self.assertNotIn(dim['label'], radar_en)
+        self.assertIn('BTC &lt;100k&gt; &quot;quote&quot; check.', page_en)
+        # Ensure SVG parses cleanly and wraps English words without splitting mid-word.
+        ET.fromstring(radar_en)
+        self.assertIn('>Counterargument</tspan>', radar_en)
+        self.assertIn('>Engagement</tspan>', radar_en)
+
 
 if __name__ == '__main__':
     unittest.main()

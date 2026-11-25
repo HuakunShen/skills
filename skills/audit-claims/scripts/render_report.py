@@ -451,7 +451,49 @@ def plot_series(values, color, width, css_class="", counts=None, planned_n=None)
     return "".join(parts)
 
 
+def dim_label(dimension, lang="zh"):
+    if lang == "en" and isinstance(dimension.get("label_en"), str) and dimension["label_en"].strip():
+        return dimension["label_en"]
+    return dimension["label"]
+
+
+def dim_description(dimension, lang="zh"):
+    if lang == "en" and isinstance(dimension.get("description_en"), str) and dimension["description_en"].strip():
+        return dimension["description_en"]
+    return dimension.get("description") or ""
+
+
+def _text_units(value):
+    return sum(2 if unicodedata.east_asian_width(ch) in {"W", "F"} else 1 for ch in value)
+
+
 def wrap_svg_text(label, max_units):
+    if " " in label:
+        lines, current, width = [], "", 0
+        for word in label.split():
+            w_units = _text_units(word)
+            if current and width + 1 + w_units <= max_units:
+                current += " " + word
+                width += 1 + w_units
+            elif not current and w_units <= max_units:
+                current, width = word, w_units
+            else:
+                if current:
+                    lines.append(current)
+                    current, width = "", 0
+                if w_units <= max_units:
+                    current, width = word, w_units
+                else:
+                    for char in word:
+                        units = 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+                        if width + units > max_units and current:
+                            lines.append(current)
+                            current, width = "", 0
+                        current += char
+                        width += units
+        if current:
+            lines.append(current)
+        return lines
     lines, current, width = [], "", 0
     for char in label:
         units = 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
@@ -466,7 +508,7 @@ def wrap_svg_text(label, max_units):
 
 
 def svg_label(label, x, y, anchor):
-    lines = wrap_svg_text(label, 14)
+    lines = wrap_svg_text(label, 16)
     if len(lines) > 3:
         lines = lines[:3]
         lines[-1] = lines[-1][:-1] + "…"
@@ -522,7 +564,7 @@ def render_radar(data, theme=None, rubric=None, standalone=False, lang="zh"):
         x, y = 310 + 137 * math.cos(angle), 210 + 137 * math.sin(angle)
         lx, ly = 310 + 164 * math.cos(angle), 210 + 164 * math.sin(angle)
         anchor = "middle" if abs(math.cos(angle)) < 0.1 else "start" if math.cos(angle) > 0 else "end"
-        parts.append(f'<line class="axis" x1="310" y1="210" x2="{x:.3f}" y2="{y:.3f}"/>' + svg_label(dimension["label"], lx, ly, anchor))
+        parts.append(f'<line class="axis" x1="310" y1="210" x2="{x:.3f}" y2="{y:.3f}"/>' + svg_label(dim_label(dimension, lang), lx, ly, anchor))
     if stats:
         for i, review in enumerate(data["panel"]["reviews"]):
             if review["status"] == "completed":
@@ -631,11 +673,11 @@ def render_panel(data, prepared, theme, lang="zh", expand_details=False):
         cells = "".join(f'<td>{fmt(next((r for r in p["reviews"] if r["model_id"] == model), {}).get("scores", {}).get(key),1)}</td>' for model in stats["planned_models"])
         judge_record = p.get("judge") or {}
         judge_score = (judge_record.get("scores") or {}) if judge_record.get("status") == "completed" else {}
-        rows.append(f'<tr><td><span class="dim-label">{esc(dim["label"])}</span><span class="n-note">n = {m["n"]} / {len(stats["planned_models"])}</span></td>{cells}<td class="mean-cell">{fmt(m["mean"])}</td><td>{fmt(m["sample_variance"])}</td><td>{fmt(m["sd"])}</td><td>{fmt(m["min"],1)}–{fmt(m["max"],1)}</td><td>{fmt(judge_score.get(key),1)}</td></tr>')
+        rows.append(f'<tr><td><span class="dim-label" title="{esc(dim_description(dim, lang))}">{esc(dim_label(dim, lang))}</span><span class="n-note">n = {m["n"]} / {len(stats["planned_models"])}</span></td>{cells}<td class="mean-cell">{fmt(m["mean"])}</td><td>{fmt(m["sample_variance"])}</td><td>{fmt(m["sd"])}</td><td>{fmt(m["min"],1)}–{fmt(m["max"],1)}</td><td>{fmt(judge_score.get(key),1)}</td></tr>')
     heads = "".join(f'<th scope="col">{esc(model_name(data,m))}</th>' for m in stats["planned_models"])
     legends = "".join(f'<span class="legend-item"><i class="legend-line" style="border-color:{COLORS[i % len(COLORS)]}"></i>{esc(model_name(data,r["model_id"]))}</span>' for i, r in enumerate(p["reviews"]) if r["status"] == "completed")
     high_disagreement = max(((key, value) for key, value in stats["metrics"].items() if value["sd"] is not None), key=lambda pair: pair[1]["sd"], default=(None, {}))
-    label_map = {d["id"]: d["label"] for d in dims}
+    label_map = {d["id"]: dim_label(d, lang) for d in dims}
     missing_axes = sum(stats["metrics"].get(k, {}).get("n", 0) < len(stats["planned_models"]) for k in [d["id"] for d in dims])
     body = f'<div class="card"><div class="radar-layout"><div class="radar-wrap">{render_radar(data,theme,prepared["rubric"],lang=lang)}</div><div class="radar-note"><h3>{esc(t["panel_note_h"])}</h3><p>{esc(t["panel_note_p"])}</p><div class="mini-stat"><span>{esc(t["panel_completed"])}</span><strong>{len(completed)} <span style="font-size:12px;font-weight:400">/ {len(stats["planned_models"])} {esc(t["panel_models_unit"])}</span></strong></div><div class="mini-stat"><span>{esc(t["panel_max_sd"])}</span><strong style="font-size:14px">{esc(label_map.get(high_disagreement[0], t["panel_insufficient"]))}</strong><span>SD {fmt(high_disagreement[1].get("sd"))}</span></div><p style="margin-top:15px">{esc(t["panel_missing_note"].format(n=missing_axes))}</p></div></div><div class="legend">{legends}<span class="legend-item"><i class="legend-line mean-line"></i>{esc(t["mean_legend"])}</span></div><div class="table-wrap"><table><caption>{esc(t["table_caption"])}</caption><thead><tr><th scope="col">{esc(t["th_dim"])}</th>{heads}<th scope="col">{esc(t["th_mean"])}</th><th scope="col">{esc(t["th_var"])}</th><th scope="col">{esc(t["th_sd"])}</th><th scope="col">{esc(t["th_range"])}</th><th scope="col">{esc(t["th_judge"])}</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="card-footer">{esc(t["panel_footer"])}</div>'
     open_attr = " open" if expand_details else ""
@@ -654,7 +696,7 @@ def render_panel(data, prepared, theme, lang="zh", expand_details=False):
             supporting = citation_links(data, explanation.get("supporting_evidence_ids", []))
             counter = citation_links(data, explanation.get("counter_evidence_ids", []))
             reasons.append(f'<div class="reason-row"><div class="reason-meta"><span>{esc(model_name(data,review["model_id"]))}{" · Judge" if review is judge_record else ""}</span><span>{fmt(value,1)} / 10</span></div><p>{esc(reason)}</p><span class="source-meta">{esc(t["support_mat"])} </span>{supporting or "—"} <span class="source-meta">{esc(t["counter_mat"])} </span>{counter or "—"}</div>')
-        body += f'<details{open_attr}><summary>{esc(dim["label"])} · {esc(t["expand_rationale"])}</summary><div class="reason-content">{"".join(reasons)}</div></details>'
+        body += f'<details{open_attr}><summary>{esc(dim_label(dim, lang))} · {esc(t["expand_rationale"])}</summary><div class="reason-content">{"".join(reasons)}</div></details>'
     judge = p.get("judge")
     if judge and judge.get("status") == "completed":
         body += f'<div class="judge"><div><div class="judge-label">{esc(t["judge_review"])}</div><div class="judge-note">{esc(t["judge_note"])}</div></div><div><p>{esc(judge["summary"])}</p>{citation_links(data,judge.get("evidence_ids",[]))}</div></div>'
@@ -703,7 +745,8 @@ def render_report(data, view="full", theme=None, rubric=None, lang="zh", expand_
     for case in data.get("cases") or []:
         st_key = case.get("status", "not_checked")
         status, tone = t["status"][st_key], STATUS_TONES[st_key]
-        cases.append(f'<article class="card case"><div class="case-top"><h3>{esc(case["title"])}</h3>{badge(status,tone)}</div><p class="case-claim">{esc(case["claim"])}</p><p>{esc(case["assessment"])}</p>{citation_links(data,case.get("evidence_ids") or [])}<p class="source-meta">{esc(case.get("notes") or "")}</p></article>')
+        quote_html = f'<blockquote class="quote">“{esc(case["original_quote"])}”</blockquote>' if isinstance(case.get("original_quote"), str) and case["original_quote"].strip() else ""
+        cases.append(f'<article class="card case"><div class="case-top"><h3>{esc(case["title"])}</h3>{badge(status,tone)}</div><p class="case-claim">{esc(case["claim"])}</p>{quote_html}<p>{esc(case["assessment"])}</p>{citation_links(data,case.get("evidence_ids") or [])}<p class="source-meta">{esc(case.get("notes") or "")}</p></article>')
     case_section = f'<section id="cases" class="section"><div class="section-heading"><div><h2>{esc(t["cases_title"])}</h2><p class="section-description">{esc(t["cases_desc"])}</p></div></div><div class="cases">'+''.join(cases)+'</div></section>' if cases and view == "full" else ''
     c = data.get("coverage") or {}
     cost = data.get("costs") or {}

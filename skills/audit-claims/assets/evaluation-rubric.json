@@ -7,7 +7,9 @@
     {
       "id": "source_transparency",
       "label": "引用依据清晰度",
+      "label_en": "Source Transparency",
       "description": "评价被评人如何说明其主张的来源、日期、方法和依据边界；不评价审计者后来找到的证据质量，也不要求每句常识都附链接。",
+      "description_en": "Evaluates how clearly the speaker states the source, date, method, and evidentiary boundaries of their claims; does not score the quality of evidence later found by auditors or require links for common knowledge.",
       "anchors": {
         "0": "在多个有实质影响的经验性主张中，反复把无法追溯的传闻或具体数字当成已证实依据，且原文没有足以识别来源的说明。",
         "3": "偶尔提及来源名称，但多数关键经验主张缺少时间、原始出处或一手/转述区分。",
@@ -20,7 +22,9 @@
     {
       "id": "fact_interpretation_separation",
       "label": "事实与解释区分",
+      "label_en": "Fact vs. Interpretation",
       "description": "评价是否让读者辨别观察、转述、推断、因果解释及价值判断；不按评审者是否赞同其结论给分。",
+      "description_en": "Evaluates whether readers can distinguish observations, quotations, inferences, causal explanations, and value judgments; does not score based on agreement with the speaker's conclusions.",
       "anchors": {
         "0": "多个明确案例中，将自己的推断或价值判断直接表述为已观察事实，或把引述、相关性和因果结论相互替换而不说明。",
         "3": "局部标注了出处，但常把个人因果推断与事实描述混写在一起，读者难以剥离。",
@@ -33,7 +37,9 @@
     {
       "id": "prediction_operationality",
       "label": "预测可操作性",
+      "label_en": "Prediction Operationality",
       "description": "评价预测在发表时是否给出可理解的对象、条件、时间与结果标准；定性事件也可以高度可操作，不评价预测后来是否命中。",
+      "description_en": "Evaluates whether predictions specify an intelligible target, condition, timeframe, and outcome criterion at publication time; qualitative events can also be highly operational; does not score whether the prediction later came true.",
       "anchors": {
         "0": "有实质内容的未来断言反复缺少对象、期限或结果定义，或在结果出现后重写判据，使原预测无法按原意核对。",
         "3": "虽提及方向或大类目标，但关键预测普遍缺少期限或明确触发条件。",
@@ -46,7 +52,9 @@
     {
       "id": "uncertainty_expression",
       "label": "不确定性表达",
+      "label_en": "Uncertainty Expression",
       "description": "评价是否清楚表达已知限制、假设、替代情形和更新条件；不要求无依据的数值概率，也不把始终含糊当作审慎。",
+      "description_en": "Evaluates how clearly the speaker communicates known limitations, assumptions, alternative scenarios, and update conditions; does not require fabricated numeric probabilities or treat constant vagueness as caution.",
       "anchors": {
         "0": "在多个原文明示存在重大未知或条件限制的场景中，结论仍被表述为无条件确定，且关键假设被省略或否认。",
         "3": "仅在少数边缘句式中使用限定词，重要结论仍常省略前提与未知风险。",
@@ -59,7 +67,9 @@
     {
       "id": "correction_transparency",
       "label": "更新纠错透明度",
+      "label_en": "Correction Transparency",
       "description": "在可观察的纠错或修订机会中，评价是否明确保留旧说法、新说法、时间、原因和影响；未发现更正不等于从未更正。",
+      "description_en": "In observable correction or revision opportunities, evaluates whether prior statements, updated statements, dates, reasons, and downstream impacts are clearly preserved; finding no corrections does not imply none occurred.",
       "anchors": {
         "0": "多个可核对的修订场景中，原文与后续版本明确冲突，而本人否认已记录的旧表述，或将修改后的内容描述成原先就如此。",
         "3": "虽改用了新口径，但几乎不提曾有过不同旧版本。",
@@ -72,7 +82,9 @@
     {
       "id": "counterargument_engagement",
       "label": "反方回应质量",
+      "label_en": "Counterargument Engagement",
       "description": "评价如何理解和回应与其论点有关的反例、反证和异议，不奖励任何特定政治、伦理或价值立场。",
+      "description_en": "Evaluates how the speaker understands and addresses relevant counterexamples, counterevidence, and objections; does not reward any political, ethical, or value stance.",
       "anchors": {
         "0": "在多个可定位的回应中，歪曲异议的关键命题，或只以身份标签/人身贬损代替对所回应理由的处理。",
         "3": "偶有回应反方观点，但主要挑选较弱或边缘批评作反驳。",
@@ -85,7 +97,9 @@
     {
       "id": "stance_change_explanation",
       "label": "跨期立场解释",
+      "label_en": "Stance Change Explanation",
       "description": "在可比跨期变化或明确讨论长期一致性的场景中，评价是否说明前后立场及改变/保持的理由；不奖励固守，也不惩罚有依据的改观。",
+      "description_en": "In comparable longitudinal shifts or explicit claims of long-term consistency, evaluates whether prior and current stances and reasons for changing or holding steady are explained; neither rewards stubbornness nor penalizes evidence-based updates.",
       "anchors": {
         "0": "多个可比跨期案例中，后续自述否认有记录的旧立场，或宣称前后一致却无法与本人明确表态相容且未作解释。",
         "3": "立场出现明显转移但仅做笼统带过，未对照过往表态。",
@@ -98,7 +112,9 @@
     {
       "id": "argument_clarity",
       "label": "论证清晰度",
+      "label_en": "Argument Clarity",
       "description": "评价读者能否辨认主张、理由、关键定义、推理和适用边界；不按口音、语言流利程度、文风偏好或政治认同给分。",
+      "description_en": "Evaluates whether readers can identify claims, reasons, key definitions, reasoning steps, and scope boundaries; does not score based on accent, fluency, stylistic preference, or political alignment.",
       "anchors": {
         "0": "多个完整上下文仍无法重建主要论证，关键概念反复换义或结论与给出的理由缺乏可说明的连接。",
         "3": "观点明确但论证跳跃较多，关键概念或适用范围常需读者自行脑补。",

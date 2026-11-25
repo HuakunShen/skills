@@ -37,7 +37,10 @@ def read_json(path):
 
 
 def read_rows(path):
-    return common.read_jsonl(path)
+    try:
+        return common.read_jsonl(path)
+    except ValueError as exc:
+        raise ValueError(f"{exc} (expected JSONL: one JSON object per line, not a JSON array)") from exc
 
 
 def atomic_text(path, text):
@@ -464,16 +467,16 @@ def parser():
     for name in ("init", "validate", "freeze"):
         command = sub.add_parser(name)
         command.add_argument("--run", required=True)
-    report = sub.add_parser("summarize")
-    report.add_argument("--policy", required=True)
-    report.add_argument("--reviews", required=True)
-    report.add_argument("--out", required=True)
-    fact = sub.add_parser("consensus")
-    fact.add_argument("--policy", required=True)
-    fact.add_argument("--votes", required=True)
-    fact.add_argument("--decision")
-    fact.add_argument("--allow-indeterminate", action="store_true")
-    fact.add_argument("--out", required=True)
+    report = sub.add_parser("summarize", help="Summarize independent qualitative model reviews from a JSONL file")
+    report.add_argument("--policy", required=True, help="Path to frozen model-policy.json")
+    report.add_argument("--reviews", required=True, help="JSONL file (one review JSON object per line, NOT a JSON array)")
+    report.add_argument("--out", required=True, help="Output JSON path for panel summary")
+    fact = sub.add_parser("consensus", help="Compute verification consensus from a JSONL votes file")
+    fact.add_argument("--policy", required=True, help="Path to frozen model-policy.json")
+    fact.add_argument("--votes", required=True, help="JSONL file (one vote JSON object per line, NOT a JSON array)")
+    fact.add_argument("--decision", help="Optional JSON file containing a judge or human decision object")
+    fact.add_argument("--allow-indeterminate", action="store_true", help="Allow terminal indeterminate consensus")
+    fact.add_argument("--out", required=True, help="Output JSON path for consensus result")
     return p
 
 

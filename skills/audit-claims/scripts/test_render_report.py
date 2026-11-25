@@ -341,6 +341,118 @@ class RenderReportTests(unittest.TestCase):
         self.assertIn('Hard (4/5)', page_en)
         self.assertIn('91–180d', page_en)
 
+    def test_colorful_charts_valid_svg_xml_and_boxplot_threshold(self):
+        import re
+        for lang in ('zh', 'en'):
+            with self.subTest(lang=lang):
+                page = renderer.render_report(self.data, lang=lang)
+                radar = renderer.render_radar(self.data, standalone=True, lang=lang)
+                # Multi-stop gradient & score badges in colorful radar
+                self.assertIn('id="radar-mean-fill"', radar)
+                self.assertIn('id="radar-mean-stroke"', radar)
+                self.assertIn('class="score-badge', radar)
+                ET.fromstring(radar)
+                # All inline SVGs in the report parse as clean XML with no unsafe elements
+                svgs = re.findall(r'<svg\b.*?</svg>', page, flags=re.DOTALL)
+                self.assertGreaterEqual(len(svgs), 5)  # stacked verdict, difficulty, histogram, boxplot, radar
+                for raw_svg in svgs:
+                    root = ET.fromstring(raw_svg)
+                    self.assertFalse(any(node.tag.split('}')[-1] in {'script', 'image', 'foreignObject'} for node in root.iter()))
+                    self.assertFalse(any(name.lower().startswith('on') for node in root.iter() for name in node.attrib))
+                # Stacked verdict breakdown, difficulty chart, histogram, and box plot present
+                self.assertIn('id="vb-title"', page)
+                self.assertIn('#10B981', page)
+                self.assertIn('#F59E0B', page)
+                self.assertIn('#F43F5E', page)
+                self.assertIn('id="diff-chart-title"', page)
+                self.assertIn('viz-trend-line', page)
+                self.assertIn('viz-ci', page)
+                self.assertIn('id="hor-hist-title"', page)
+                self.assertIn('viz-acc-line', page)
+                self.assertIn('id="bp-title"', page)
+                self.assertIn('viz-mean-diamond', page)
+
+        # Box plot falls back gracefully to empty-state note when <3 dated predictions exist
+        sparse = copy.deepcopy(self.data)
+        sparse['cases'] = [c for c in sparse['cases'] if c.get('lead_time_days') is None][:2]
+        sparse['cases'].append({
+            'id': 'C_ONLY1', 'title': 'Single dated', 'claim': 'Only one dated prediction.',
+            'claim_type': 'prediction', 'status': 'supported', 'lead_time_days': 45,
+            'assessment': 'Supported.', 'evidence_ids': ['S01'],
+        })
+        page_sparse_zh = renderer.render_report(sparse, lang='zh')
+        page_sparse_en = renderer.render_report(sparse, lang='en')
+        self.assertNotIn('id="bp-title"', page_sparse_zh)
+        self.assertIn('至少 3 条带提前期的预测样本（当前可用：1 条）', page_sparse_zh)
+        self.assertNotIn('id="bp-title"', page_sparse_en)
+        self.assertIn('at least 3 dated predictions (available: 1)', page_sparse_en)
+
+    def test_five_num_summary_and_english_zero_cjk_leak(self):
+        import re
+        s = renderer._five_num_summary([10, 20, 30, 40, 50])
+        self.assertEqual((s['min'], s['q1'], s['median'], s['q3'], s['max'], s['mean']), (10.0, 20.0, 30.0, 40.0, 50.0, 30.0))
+        self.assertIsNone(renderer._five_num_summary([]))
+
+        # Build a clean English data payload and confirm zero CJK characters leak in --lang en
+        en_data = copy.deepcopy(self.data)
+        en_data['report'].update({
+            'title': 'English Audit Report', 'longitudinal_title': 'English Timeline',
+            'subject': 'Sample Creator', 'subtitle': 'Subtitle', 'summary': ['Summary line.'],
+            'scope_note': 'Scope note.',
+        })
+        en_data['metrics']['composite']['reason'] = 'Withheld for demo.'
+        for m in en_data['panel']['policy']['selected_models']:
+            m['display_name'] = f"Model {m['id'].upper()}"
+        en_data['panel']['policy']['policy_hash'] = panel.policy_hash(en_data['panel']['policy'])
+        for rev in en_data['panel']['reviews'] + [en_data['panel']['judge']]:
+            if rev.get('summary'):
+                rev['summary'] = 'Judge summary.'
+            for dim, rat in rev['rationales'].items():
+                if rat.get('rationale'):
+                    rat['rationale'] = f'Rationale for {dim}.'
+                if rat.get('missing_reason'):
+                    rat['missing_reason'] = f'Missing reason for {dim}.'
+        en_data['topics'] = [{
+            'id': 't1', 'label': 'Topic One', 'summary': 'Summary.', 'assessment': 'Assessment.',
+            'entries': [{
+                'id': 'E1', 'date': '2024-01-01', 'stance': 'Bullish', 'claim': 'Claim text.',
+                'quote': 'Direct quote.', 'context': 'Context.', 'status': 'supported',
+                'source_ids': ['S01'], 'evidence_ids': ['E01'],
+                'transition': {'kind': 'genuine_change', 'label': 'Updated', 'explanation': 'Explained.'},
+            }],
+        }]
+        en_data['sources'] = [
+            {'id': s['id'], 'title': f"Source {s['id']}", 'url': None, 'published_at': s.get('published_at'), 'locator': 'loc', 'excerpt': 'Excerpt.'}
+            for s in en_data['sources']
+        ]
+        en_data['cases'] = [
+            {
+                'id': c['id'], 'title': f"Case {c['id']}", 'claim': 'Claim text.', 'claim_type': c.get('claim_type'),
+                'status': c['status'], 'difficulty': c.get('difficulty'), 'difficulty_score': c.get('difficulty_score'),
+                'lead_time_days': c.get('lead_time_days'), 'assessment': 'Assessment.', 'evidence_ids': ['S01'], 'notes': 'Note.',
+            }
+            for c in en_data['cases']
+        ]
+        en_data['coverage']['notes'] = ['Coverage note.']
+        en_data['costs']['notes'] = ['Cost note.']
+        en_data['limitations'] = ['Limitation note.']
+
+        page_en = renderer.render_report(en_data, lang='en')
+        radar_en = renderer.render_radar(en_data, standalone=True, lang='en')
+        self.assertIsNone(re.search(r'[\u4e00-\u9fff]', page_en), 'Found leaked CJK characters in --lang en HTML')
+        self.assertIsNone(re.search(r'[\u4e00-\u9fff]', radar_en), 'Found leaked CJK characters in --lang en SVG')
+
+        # Even if an older frozen rubric lacks label_en/description_en, --lang en must not leak Chinese labels
+        legacy_rubric = copy.deepcopy(self.rubric)
+        for dim in legacy_rubric['dimensions']:
+            dim.pop('label_en', None)
+            dim.pop('description_en', None)
+        self.rebind_rubric(en_data, legacy_rubric)
+        legacy_page_en = renderer.render_report(en_data, lang='en')
+        legacy_radar_en = renderer.render_radar(en_data, standalone=True, lang='en')
+        self.assertIsNone(re.search(r'[\u4e00-\u9fff]', legacy_page_en), 'Found leaked CJK characters with legacy rubric in --lang en HTML')
+        self.assertIsNone(re.search(r'[\u4e00-\u9fff]', legacy_radar_en), 'Found leaked CJK characters with legacy rubric in --lang en SVG')
+
 
 if __name__ == '__main__':
     unittest.main()

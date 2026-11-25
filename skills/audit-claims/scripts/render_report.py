@@ -23,21 +23,44 @@ import model_panel as panel
 
 ROOT = Path(__file__).resolve().parent.parent
 THEME = {
-    "light": {"background": "#FAFAFA", "surface": "#FFFFFF", "foreground": "#18181B", "muted": "#71717A", "border": "#E4E4E7", "accent": "#2563EB", "subtle": "#F4F4F5"},
-    "dark": {"background": "#101113", "surface": "#18191C", "foreground": "#F4F4F5", "muted": "#A1A1AA", "border": "#303137", "accent": "#7DA8FF", "subtle": "#222328"},
-    "radius": 8, "font": "system",
+    "light": {"background": "#F8FAFC", "surface": "#FFFFFF", "foreground": "#0F172A", "muted": "#64748B", "border": "#E2E8F0", "accent": "#4F46E5", "subtle": "#F1F5F9"},
+    "dark": {"background": "#0B0F19", "surface": "#111827", "foreground": "#F8FAFC", "muted": "#94A3B8", "border": "#263248", "accent": "#818CF8", "subtle": "#1E293B"},
+    "radius": 10, "font": "system",
 }
 FONT = {"system": 'ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif', "sans": 'Arial,"Noto Sans CJK SC","Microsoft YaHei",sans-serif'}
-COLORS = ("#64748B", "#3B82F6", "#0F766E", "#8B5CF6", "#B45309")
-STATUS_TONES = {"supported": "ok", "contradicted": "negative", "mixed": "muted", "pending": "muted", "indeterminate": "muted", "not_checked": "muted"}
-RELATION_TONES = {"continuity": "muted", "genuine_change": "accent", "not_comparable": "muted", "contradiction": "muted", "unclear": "muted"}
+COLORS = ("#3B82F6", "#10B981", "#F59E0B", "#EC4899", "#06B6D4")
+STATUS_TONES = {"supported": "ok", "contradicted": "negative", "mixed": "warn", "pending": "info", "indeterminate": "violet", "not_checked": "muted"}
+RELATION_TONES = {"continuity": "ok", "genuine_change": "accent", "not_comparable": "warn", "contradiction": "negative", "unclear": "muted"}
+
+VIZ = {
+    "supported": "#10B981",
+    "supported_dark": "#059669",
+    "mixed": "#F59E0B",
+    "mixed_dark": "#D97706",
+    "contradicted": "#F43F5E",
+    "contradicted_dark": "#E11D48",
+    "pending": "#38BDF8",
+    "other": "#94A3B8",
+    "indigo": "#4F46E5",
+    "violet": "#7C3AED",
+    "teal": "#0D9488",
+    "sky": "#0EA5E9",
+}
+
+DIFF_TIER_COLORS = {
+    "trivial": ("#34D399", "#059669"),
+    "moderate": ("#60A5FA", "#2563EB"),
+    "hard": ("#FBBF24", "#D97706"),
+    "non_consensus": ("#A78BFA", "#7C3AED"),
+    "unrated": ("#94A3B8", "#64748B"),
+}
 
 I18N = {
     "zh": {
         "html_lang": "zh-CN",
         "brand_sub": "/ 研究报告",
         "static_note": "静态报告 · 可离线阅读",
-        "nav_title": "REPORT CONTENTS",
+        "nav_title": "报告目录",
         "side_note": "事实核验与表达评价分开。<br>保留原话、分歧与未知。",
         "nav": [("overview", "报告总览"), ("model-panel", "表达评价"), ("longitudinal", "跨期观点"), ("cases", "核验案例"), ("coverage", "覆盖与成本"), ("sources", "材料与引用")],
         "nav_long": [("overview", "报告总览"), ("longitudinal", "观点时间线"), ("model-panel", "表达评价"), ("coverage", "范围与限制"), ("sources", "材料与引用")],
@@ -51,25 +74,63 @@ I18N = {
         "brier_label": "概率校准 · Brier", "brier_note": "越低越好，仅明确概率",
         "pred_vs_fact": "预测 vs 事实分项",
         "pred_rate": "预测兑现率", "fact_rate": "事实支持率",
+        "family_weighted": "按主题簇加权", "families_unit": "个主题簇",
         "scm_detail": "分类结果明细",
+        "scm_label": "支持 / 反驳 / 部分 (N={n})",
+        "binary_acc_label": "二元支持率 S/(S+C)",
+        "evidence_quality_label": "证据质量均值",
         "lifecycle_dist": "生命周期分布",
+        "lifecycle_fmt": "待结算={pending} · 待补证={awaiting} · 争议={disputed} · 无法判定={indet}",
         "domain_breakdown": "分领域统计",
         "difficulty_title": "预测难度分层",
         "difficulty_non_trivial": "非平凡预测支持率",
         "difficulty_tiers": {"trivial": "平凡 / 近确定", "moderate": "中等", "hard": "较难", "non_consensus": "反共识 / 高难", "unrated": "未评级"},
+        "difficulty_tiers_short": {"trivial": "平凡", "moderate": "中等", "hard": "较难", "non_consensus": "反共识", "unrated": "未评级"},
         "th_tier": "难度等级", "th_claims": "预测数", "th_mean_score": "均分(1–5)",
         "horizon_title": "预测提前期分布",
         "horizon_mean_lead": "平均提前期", "horizon_median_lead": "中位提前期", "horizon_supported_lead": "命中平均提前期",
         "th_horizon": "提前期区间", "th_avg_lead": "平均天数",
         "horizon_buckets": {"le_30d": "≤30天", "31_90d": "31–90天", "91_180d": "91–180天", "181_365d": "181–365天", "gt_365d": ">365天"},
+        "verdict_chart_title": "裁定结果堆叠分布",
+        "verdict_chart_desc": "按断言类型与预测难度比较支持、部分支持与证据反驳构成",
+        "verdict_group_types": "总计与断言类型",
+        "verdict_group_difficulty": "按预测难度分层",
+        "overall_label": "全部已裁定",
+        "claim_types": {"factual": "事实陈述", "prediction": "未来预测", "causal": "因果断言", "hypothetical": "假设情形", "preference": "偏好表达", "value_judgment": "价值判断"},
+        "other_unsplit": "非支持(未细分)",
+        "diff_chart_title": "预测难度 vs. 严格支持率",
+        "diff_chart_desc": "展示从平凡到反共识预测的准确率走势与 95% Wilson 置信区间",
+        "diff_nontrivial_ref": "非平凡均值",
+        "diff_trend_legend": "准确率走势",
+        "diff_ci_legend": "95% Wilson 区间",
+        "horizon_hist_title": "预测提前期直方图与命中率叠加",
+        "horizon_hist_desc": "柱高为各区间预测数（按裁定结果堆叠），折线为严格支持率",
+        "horizon_axis_count": "预测数量",
+        "horizon_axis_rate": "严格支持率",
+        "horizon_pending_other": "待结算/其他",
+        "horizon_avg_prefix": "均",
+        "boxplot_title": "提前期分布箱线图（支持 vs. 反驳/部分支持）",
+        "boxplot_desc": "对比支持预测与反驳/部分支持预测的提前期分布（最小、Q1、中位、Q3、最大与均值）",
+        "boxplot_supported": "支持（命中）",
+        "boxplot_not_supported": "反驳 / 部分支持",
+        "boxplot_all": "全部带日期预测",
+        "boxplot_empty": "提前期箱线图需至少 3 条带提前期的预测样本（当前可用：{n} 条）。",
+        "boxplot_legend_whisker": "最小–最大",
+        "boxplot_legend_iqr": "Q1–Q3 四分位",
+        "boxplot_legend_median": "中位数",
+        "boxplot_legend_mean": "均值",
+        "boxplot_stat_med": "中位",
+        "boxplot_stat_mean": "均值",
+        "boxplot_axis_days": "提前期（天）",
         "synthetic_banner": "<strong>合成演示数据</strong><span>人物、原话、核验案例与模型分数均为手工构造；未调用真实模型，也不代表真实人物。</span>",
         "mean_legend": "可用评分均值",
         "radar_title": "{n}维表达与可审计性雷达",
-        "radar_desc": "零到十分；细线为各模型，粗线为可用评分均值。缺失值或 n<2 轴保留断点。精确数据见报告表格。",
+        "radar_desc": "零到十分；细线为各模型，渐变粗线为可用评分均值，标签下方徽章为各维均值。缺失值或 n<2 轴保留断点。精确数据见报告表格。",
         "radar_synth_desc": "手工合成演示，未调用真实模型。",
         "radar_synth_foot": "合成演示数据 · 未调用真实模型",
         "date_unknown": "日期未提供",
         "composite_withheld": "综合分暂不发布",
+        "composite_blockers_prefix": "综合分暂缓原因：",
         "summary_label": "阅读结论",
         "default_scope_note": "本报告只涵盖已列明的材料和日期范围。",
         "as_of_prefix": "截止",
@@ -130,25 +191,63 @@ I18N = {
         "brier_label": "Calibration · Brier", "brier_note": "Lower is better; explicit probabilities only",
         "pred_vs_fact": "Predictions vs. Factual Claims",
         "pred_rate": "Prediction Support Rate", "fact_rate": "Factual Support Rate",
+        "family_weighted": "Family-weighted", "families_unit": "families",
         "scm_detail": "Categorical Outcome Breakdown",
+        "scm_label": "S / C / M (N={n})",
+        "binary_acc_label": "Binary S/(S+C)",
+        "evidence_quality_label": "Evidence quality",
         "lifecycle_dist": "Lifecycle Distribution",
+        "lifecycle_fmt": "pending={pending} · awaiting={awaiting} · disputed={disputed} · indet={indet}",
         "domain_breakdown": "By Domain",
         "difficulty_title": "Prediction Difficulty Breakdown",
         "difficulty_non_trivial": "Non-trivial prediction support rate",
         "difficulty_tiers": {"trivial": "Trivial / Near-certain", "moderate": "Moderate", "hard": "Hard", "non_consensus": "Non-consensus", "unrated": "Unrated"},
+        "difficulty_tiers_short": {"trivial": "Trivial", "moderate": "Moderate", "hard": "Hard", "non_consensus": "Non-consensus", "unrated": "Unrated"},
         "th_tier": "Difficulty Tier", "th_claims": "Predictions", "th_mean_score": "Mean (1–5)",
         "horizon_title": "Prediction Lead-Time / Horizon",
         "horizon_mean_lead": "Mean lead time", "horizon_median_lead": "Median lead time", "horizon_supported_lead": "Supported mean lead",
         "th_horizon": "Horizon Bucket", "th_avg_lead": "Avg Lead (d)",
         "horizon_buckets": {"le_30d": "≤30d", "31_90d": "31–90d", "91_180d": "91–180d", "181_365d": "181–365d", "gt_365d": ">365d"},
+        "verdict_chart_title": "Stacked Verdict Breakdown",
+        "verdict_chart_desc": "Supported, mixed, and contradicted shares across claim types and prediction difficulty tiers",
+        "verdict_group_types": "Overall & Claim Types",
+        "verdict_group_difficulty": "By Prediction Difficulty Tier",
+        "overall_label": "All Adjudicated",
+        "claim_types": {"factual": "Factual", "prediction": "Prediction", "causal": "Causal", "hypothetical": "Hypothetical", "preference": "Preference", "value_judgment": "Value judgment"},
+        "other_unsplit": "Other (non-supported)",
+        "diff_chart_title": "Prediction Difficulty vs. Accuracy",
+        "diff_chart_desc": "Accuracy progression from trivial to non-consensus predictions with 95% Wilson CIs",
+        "diff_nontrivial_ref": "Non-trivial",
+        "diff_trend_legend": "Accuracy trend",
+        "diff_ci_legend": "95% Wilson CI",
+        "horizon_hist_title": "Lead-Time Horizon Histogram & Accuracy Overlay",
+        "horizon_hist_desc": "Bar height shows prediction count stacked by outcome; line overlay shows strict support rate",
+        "horizon_axis_count": "Predictions",
+        "horizon_axis_rate": "Support Rate",
+        "horizon_pending_other": "Pending / Other",
+        "horizon_avg_prefix": "avg",
+        "boxplot_title": "Lead-Time Distribution Box Plot (Supported vs. Contradicted/Mixed)",
+        "boxplot_desc": "Compares lead-time days (min, Q1, median, Q3, max, and mean) for supported vs. contradicted/mixed predictions",
+        "boxplot_supported": "Supported",
+        "boxplot_not_supported": "Contradicted / Mixed",
+        "boxplot_all": "All Dated",
+        "boxplot_empty": "Lead-time box plot requires at least 3 dated predictions (available: {n}).",
+        "boxplot_legend_whisker": "Min–Max",
+        "boxplot_legend_iqr": "Q1–Q3 IQR",
+        "boxplot_legend_median": "Median",
+        "boxplot_legend_mean": "Mean",
+        "boxplot_stat_med": "Med",
+        "boxplot_stat_mean": "Mean",
+        "boxplot_axis_days": "Lead Time (days)",
         "synthetic_banner": "<strong>Synthetic Demo Data</strong><span>Subject, quotes, evidence and scores are manually constructed; no real models were called.</span>",
         "mean_legend": "Available Mean",
         "radar_title": "{n}-Dimension Expression & Auditability Radar",
-        "radar_desc": "0 to 10 scale; thin lines are models, thick line is available mean. Missing or n<2 axes remain disconnected.",
+        "radar_desc": "0 to 10 scale; thin lines are models, gradient line is available mean with per-axis score badges. Missing or n<2 axes remain disconnected.",
         "radar_synth_desc": "Manual synthetic demonstration.",
         "radar_synth_foot": "Synthetic demo data · No real model calls",
         "date_unknown": "Date unknown",
         "composite_withheld": "Composite withheld",
+        "composite_blockers_prefix": "Composite blockers: ",
         "summary_label": "Key Findings",
         "default_scope_note": "This report covers only the listed sources and date range.",
         "as_of_prefix": "As of",
@@ -436,46 +535,97 @@ def badge(label, tone="muted"):
     return f'<span class="badge {tone}">{esc(label)}</span>'
 
 
-def plot_series(values, color, width, css_class="", counts=None, planned_n=None):
+def _score_tier(value):
+    if value is None:
+        return "na"
+    if value >= 7.5:
+        return "high"
+    if value >= 6.0:
+        return "mid"
+    if value >= 4.0:
+        return "warn"
+    return "low"
+
+
+def plot_series(values, color, width, css_class="", counts=None, planned_n=None, cx=330, cy=224, radius=132, fill=None, stroke=None, draw_wedges=False):
     coordinates = []
     for i, value in enumerate(values):
         if value is None:
             coordinates.append(None)
         else:
             angle = -math.pi / 2 + i * math.tau / len(values)
-            coordinates.append((310 + 137 * value / 10 * math.cos(angle), 210 + 137 * value / 10 * math.sin(angle)))
+            coordinates.append((cx + radius * value / 10 * math.cos(angle), cy + radius * value / 10 * math.sin(angle)))
     parts = []
+    stroke_paint = stroke or color
     # Break polygon lines on missing values OR sparse mean axes (n < 2 when planned_n >= 2).
     has_sparse = counts is not None and planned_n is not None and planned_n >= 2 and any(c < 2 for c in counts)
     if all(p is not None for p in coordinates) and not has_sparse:
         points = " ".join(f"{x:.3f},{y:.3f}" for x, y in coordinates)
-        parts.append(f'<polygon class="{css_class}" points="{points}" fill="none" stroke="{color}" stroke-width="{width}" stroke-linejoin="round"/>')
+        poly_fill = fill if fill is not None else "none"
+        fill_attr = f'fill="{poly_fill}"' if poly_fill != "none" else 'fill="none"'
+        parts.append(f'<polygon class="{css_class}" points="{points}" {fill_attr} stroke="{stroke_paint}" stroke-width="{width}" stroke-linejoin="round"/>')
     else:
         for i, point in enumerate(coordinates):
             nxt_idx = (i + 1) % len(values)
             following = coordinates[nxt_idx]
             sparse_edge = has_sparse and (counts[i] < 2 or counts[nxt_idx] < 2)
             if point is not None and following is not None and not sparse_edge:
-                parts.append(f'<path class="{css_class}" d="M {point[0]:.3f} {point[1]:.3f} L {following[0]:.3f} {following[1]:.3f}" fill="none" stroke="{color}" stroke-width="{width}"/>')
+                if draw_wedges and fill:
+                    wpts = f"{cx:.3f},{cy:.3f} {point[0]:.3f},{point[1]:.3f} {following[0]:.3f},{following[1]:.3f}"
+                    parts.append(f'<polygon class="mean-wedge" points="{wpts}" fill="{fill}" stroke="none"/>')
+                parts.append(f'<path class="{css_class}" d="M {point[0]:.3f} {point[1]:.3f} L {following[0]:.3f} {following[1]:.3f}" fill="none" stroke="{stroke_paint}" stroke-width="{width}" stroke-linecap="round"/>')
     for i, point in enumerate(coordinates):
         if point is not None:
             is_sparse = has_sparse and counts[i] < planned_n
             if is_sparse:
-                parts.append(f'<circle class="{css_class}" cx="{point[0]:.3f}" cy="{point[1]:.3f}" r="3.4" fill="none" stroke="{color}" stroke-width="2" stroke-dasharray="2 1.5"/>')
+                parts.append(f'<circle class="{css_class}" cx="{point[0]:.3f}" cy="{point[1]:.3f}" r="4.0" fill="none" stroke="{color}" stroke-width="2" stroke-dasharray="2 1.5"/>')
+            elif width > 2:
+                parts.append(f'<circle class="{css_class}" cx="{point[0]:.3f}" cy="{point[1]:.3f}" r="4.0" fill="{color}" stroke="#FFFFFF" stroke-width="1.6"/>')
             else:
-                parts.append(f'<circle class="{css_class}" cx="{point[0]:.3f}" cy="{point[1]:.3f}" r="{2.8 if width > 2 else 1.9}" fill="{color}"/>')
+                parts.append(f'<circle class="{css_class}" cx="{point[0]:.3f}" cy="{point[1]:.3f}" r="2.4" fill="{color}"/>')
     return "".join(parts)
 
 
+DEFAULT_EN_DIM_LABELS = {
+    "source_transparency": "Source Transparency",
+    "fact_interpretation_separation": "Fact vs. Interpretation",
+    "prediction_operationality": "Prediction Operationality",
+    "uncertainty_expression": "Uncertainty Expression",
+    "correction_transparency": "Correction Transparency",
+    "counterargument_engagement": "Counterargument Engagement",
+    "stance_change_explanation": "Stance Change Explanation",
+    "argument_clarity": "Argument Clarity",
+}
+
+DEFAULT_EN_DIM_DESCRIPTIONS = {
+    "source_transparency": "Evaluates how clearly the speaker states the source, date, method, and evidentiary boundaries of their claims.",
+    "fact_interpretation_separation": "Evaluates whether readers can distinguish observations, quotations, inferences, causal explanations, and value judgments.",
+    "prediction_operationality": "Evaluates whether predictions specify an intelligible target, condition, timeframe, and outcome criterion at publication time.",
+    "uncertainty_expression": "Evaluates how clearly the speaker communicates known limitations, assumptions, alternative scenarios, and update conditions.",
+    "correction_transparency": "Evaluates whether prior statements, updated statements, dates, reasons, and downstream impacts are clearly preserved.",
+    "counterargument_engagement": "Evaluates how the speaker understands and addresses relevant counterexamples, counterevidence, and objections.",
+    "stance_change_explanation": "Evaluates whether prior and current stances and reasons for changing or holding steady are explained.",
+    "argument_clarity": "Evaluates whether readers can identify claims, reasons, key definitions, reasoning steps, and scope boundaries.",
+}
+
+
 def dim_label(dimension, lang="zh"):
-    if lang == "en" and isinstance(dimension.get("label_en"), str) and dimension["label_en"].strip():
-        return dimension["label_en"]
+    if lang == "en":
+        if isinstance(dimension.get("label_en"), str) and dimension["label_en"].strip():
+            return dimension["label_en"]
+        fallback = DEFAULT_EN_DIM_LABELS.get(dimension.get("id"))
+        if fallback:
+            return fallback
     return dimension["label"]
 
 
 def dim_description(dimension, lang="zh"):
-    if lang == "en" and isinstance(dimension.get("description_en"), str) and dimension["description_en"].strip():
-        return dimension["description_en"]
+    if lang == "en":
+        if isinstance(dimension.get("description_en"), str) and dimension["description_en"].strip():
+            return dimension["description_en"]
+        fallback = DEFAULT_EN_DIM_DESCRIPTIONS.get(dimension.get("id"))
+        if fallback:
+            return fallback
     return dimension.get("description") or ""
 
 
@@ -523,15 +673,39 @@ def wrap_svg_text(label, max_units):
     return lines
 
 
-def svg_label(label, x, y, anchor):
+def svg_label(label, x, y, anchor, score=None, count_n=None, planned_n=None, max_width=660):
     lines = wrap_svg_text(label, 16)
     if len(lines) > 3:
         lines = lines[:3]
         lines[-1] = lines[-1][:-1] + "…"
-    parts = [f'<text class="label" text-anchor="{anchor}" dominant-baseline="middle" x="{x:.3f}" y="{y:.3f}"><title>{esc(label)}</title>']
+    line_step = 18
+    text_y = y - 8 if score is not None or count_n is not None else y
+    parts = [f'<text class="label" text-anchor="{anchor}" dominant-baseline="middle" x="{x:.3f}" y="{text_y:.3f}"><title>{esc(label)}</title>']
     for i, line in enumerate(lines):
-        parts.append(f'<tspan x="{x:.3f}" y="{y+(i-(len(lines)-1)/2)*20:.3f}">{esc(line)}</tspan>')
-    return "".join(parts) + '</text>'
+        parts.append(f'<tspan x="{x:.3f}" y="{text_y+(i-(len(lines)-1)/2)*line_step:.3f}">{esc(line)}</tspan>')
+    parts.append('</text>')
+    if score is not None or count_n is not None:
+        last_line_y = text_y + ((len(lines) - 1) / 2) * line_step
+        badge_y = last_line_y + 18
+        is_sparse = count_n is not None and planned_n is not None and planned_n >= 2 and count_n < planned_n
+        badge_text = "—" if score is None else (f"{score:.1f}*" if is_sparse else f"{score:.1f}")
+        tier = _score_tier(score)
+        pill_w = 38 if len(badge_text) <= 4 else 44
+        pill_h = 17
+        if anchor == "start":
+            rx = x
+        elif anchor == "end":
+            rx = x - pill_w
+        else:
+            rx = x - pill_w / 2
+        rx = max(6.0, min(max_width - pill_w - 6.0, rx))
+        tip = f"{label}: {badge_text}" + (f" (n={count_n}/{planned_n})" if count_n is not None and planned_n is not None else "")
+        parts.append(
+            f'<g class="score-badge tier-{tier}"><title>{esc(tip)}</title>'
+            f'<rect x="{rx:.1f}" y="{badge_y - pill_h/2:.1f}" width="{pill_w}" height="{pill_h}" rx="8.5"/>'
+            f'<text x="{rx + pill_w/2:.1f}" y="{badge_y + 0.5:.1f}" text-anchor="middle" dominant-baseline="middle">{esc(badge_text)}</text></g>'
+        )
+    return "".join(parts)
 
 
 def render_radar(data, theme=None, rubric=None, standalone=False, lang="zh"):
@@ -543,20 +717,22 @@ def render_radar(data, theme=None, rubric=None, standalone=False, lang="zh"):
     dark = theme["dark"]
     n = len(dims)
     dimension_ids = [d["id"] for d in dims]
-    legend, chart_height, footer_y = [], 420, 411
+    w, cx, cy, radius = 660, 330, 224, 130
+    legend, chart_height, footer_y = [], 448, 437
+    mean_color = VIZ["indigo"]
     if standalone and stats:
-        items = [(model_name(data, review["model_id"]), COLORS[i % len(COLORS)], 1.35, "model")
+        items = [(model_name(data, review["model_id"]), COLORS[i % len(COLORS)], 1.7, "model")
                  for i, review in enumerate(data["panel"]["reviews"]) if review["status"] == "completed"]
-        items.append((t["mean_legend"], fg, 2.8, "mean"))
-        y = 416
+        items.append((t["mean_legend"], "url(#radar-mean-stroke)", 3.0, "mean"))
+        y = 446
         for offset in range(0, len(items), 2):
             row = items[offset:offset + 2]
             row_lines = [wrap_svg_text(item[0], 38) for item in row]
             for column, ((label, color, width, kind), lines) in enumerate(zip(row, row_lines)):
-                x = 40 + column * 290
-                legend.append(f'<g class="radar-legend"><title>{esc(label)}</title><line class="{kind}" x1="{x}" y1="{y}" x2="{x+19}" y2="{y}" stroke="{color}" stroke-width="{width}"/>')
+                x = 40 + column * 310
+                legend.append(f'<g class="radar-legend"><title>{esc(label)}</title><line class="{kind}" x1="{x}" y1="{y}" x2="{x+22}" y2="{y}" stroke="{color}" stroke-width="{width}" stroke-linecap="round"/>')
                 for line_index, line in enumerate(lines):
-                    legend.append(f'<text x="{x+28}" y="{y+line_index*16}" dominant-baseline="middle" font-size="12">{esc(line)}</text>')
+                    legend.append(f'<text x="{x+31}" y="{y+line_index*16}" dominant-baseline="middle" font-size="12">{esc(line)}</text>')
                 legend.append('</g>')
             y += max(len(lines) for lines in row_lines) * 16 + 12
         footer_y = y + 4
@@ -564,39 +740,684 @@ def render_radar(data, theme=None, rubric=None, standalone=False, lang="zh"):
     svg_style = (
         f'text{{font-family:{FONT[theme["font"]]};fill:{muted}}}'
         f'.radar-bg{{fill:{theme["light"]["surface"]}}}'
-        f'.grid{{fill:none;stroke:{border};stroke-width:1}}.axis{{stroke:{border};stroke-width:1}}'
-        f'.label{{font-size:14px}}.mean{{stroke:{fg}}}circle.mean[fill="{fg}"]{{fill:{fg}}}.model{{opacity:.70}}'
+        f'.grid{{fill:none;stroke:{border};stroke-width:1}}'
+        f'.grid-band{{fill:#EEF2FF;fill-opacity:.38;stroke:{border};stroke-width:1}}'
+        f'.axis{{stroke:{border};stroke-width:1;stroke-dasharray:3 3}}'
+        f'.ring-num{{font-size:10px;fill:{muted};font-weight:500}}'
+        f'.label{{font-size:13px;font-weight:550;fill:{fg}}}'
+        f'.model{{opacity:.80}}'
+        f'.mean-wedge{{opacity:.85}}'
+        f'.score-badge text{{font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums}}'
+        f'.score-badge.tier-high rect{{fill:#ECFDF5;stroke:#A7F3D0;stroke-width:1}}.score-badge.tier-high text{{fill:#059669}}'
+        f'.score-badge.tier-mid rect{{fill:#EEF2FF;stroke:#C7D2FE;stroke-width:1}}.score-badge.tier-mid text{{fill:#4F46E5}}'
+        f'.score-badge.tier-warn rect{{fill:#FFFBEB;stroke:#FDE68A;stroke-width:1}}.score-badge.tier-warn text{{fill:#D97706}}'
+        f'.score-badge.tier-low rect{{fill:#FFF1F2;stroke:#FECDD3;stroke-width:1}}.score-badge.tier-low text{{fill:#E11D48}}'
+        f'.score-badge.tier-na rect{{fill:#F1F5F9;stroke:#CBD5E1;stroke-width:1}}.score-badge.tier-na text{{fill:#64748B}}'
         f'@media(prefers-color-scheme:dark){{text{{fill:{dark["muted"]}}}'
-        f'.grid,.axis{{stroke:{dark["border"]}}}.mean{{stroke:{dark["foreground"]}}}'
-        f'circle.mean[fill="{fg}"]{{fill:{dark["foreground"]}}}.radar-bg{{fill:{dark["surface"]}}}}}'
+        f'.radar-bg{{fill:{dark["surface"]}}}.grid,.axis{{stroke:{dark["border"]}}}'
+        f'.grid-band{{fill:#1E1B4B;fill-opacity:.42;stroke:{dark["border"]}}}'
+        f'.label{{fill:{dark["foreground"]}}}'
+        f'.score-badge.tier-high rect{{fill:#052E24;stroke:#065F46}}.score-badge.tier-high text{{fill:#34D399}}'
+        f'.score-badge.tier-mid rect{{fill:#1E1B4B;stroke:#3730A3}}.score-badge.tier-mid text{{fill:#818CF8}}'
+        f'.score-badge.tier-warn rect{{fill:#352004;stroke:#92400E}}.score-badge.tier-warn text{{fill:#FBBF24}}'
+        f'.score-badge.tier-low rect{{fill:#380D17;stroke:#9F1239}}.score-badge.tier-low text{{fill:#F87171}}'
+        f'.score-badge.tier-na rect{{fill:#1E293B;stroke:#334155}}.score-badge.tier-na text{{fill:#94A3B8}}}}'
+    )
+    defs = (
+        '<defs>'
+        '<linearGradient id="radar-mean-fill" x1="0%" y1="0%" x2="100%" y2="100%">'
+        '<stop offset="0%" stop-color="#4F46E5" stop-opacity="0.28"/>'
+        '<stop offset="52%" stop-color="#7C3AED" stop-opacity="0.22"/>'
+        '<stop offset="100%" stop-color="#0D9488" stop-opacity="0.26"/>'
+        '</linearGradient>'
+        '<linearGradient id="radar-mean-stroke" x1="0%" y1="0%" x2="100%" y2="100%">'
+        '<stop offset="0%" stop-color="#4F46E5"/>'
+        '<stop offset="52%" stop-color="#7C3AED"/>'
+        '<stop offset="100%" stop-color="#0D9488"/>'
+        '</linearGradient>'
+        '</defs>'
     )
     desc = t["radar_desc"] + (" " + t["radar_synth_desc"] if data["synthetic"] else "")
-    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 {chart_height}" role="img" aria-labelledby="radar-chart-title radar-chart-desc"><title id="radar-chart-title">{esc(t["radar_title"].format(n=n))}</title><desc id="radar-chart-desc">{esc(desc)}</desc><style>{svg_style}</style><rect class="radar-bg" width="620" height="{chart_height}"/>']
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {chart_height}" role="img" aria-labelledby="radar-chart-title radar-chart-desc"><title id="radar-chart-title">{esc(t["radar_title"].format(n=n))}</title><desc id="radar-chart-desc">{esc(desc)}</desc><style>{svg_style}</style>{defs}<rect class="radar-bg" width="{w}" height="{chart_height}"/>']
+    for level in (10, 8, 6, 4, 2):
+        points = " ".join(f'{cx+radius*level/10*math.cos(-math.pi/2+i*math.tau/n):.3f},{cy+radius*level/10*math.sin(-math.pi/2+i*math.tau/n):.3f}' for i in range(n))
+        ring_cls = "grid-band" if level in (10, 6) else "grid"
+        parts.append(f'<polygon class="{ring_cls}" points="{points}"/>')
     for level in (2, 4, 6, 8, 10):
-        points = " ".join(f'{310+137*level/10*math.cos(-math.pi/2+i*math.tau/n):.3f},{210+137*level/10*math.sin(-math.pi/2+i*math.tau/n):.3f}' for i in range(n))
-        parts.append(f'<polygon class="grid" points="{points}"/><text x="316" y="{210-137*level/10+4:.3f}" font-size="10">{level}</text>')
+        parts.append(f'<text class="ring-num" x="{cx + 5}" y="{cy-radius*level/10+4:.3f}">{level}</text>')
+    planned_n = len(stats["planned_models"]) if stats else None
     for i, dimension in enumerate(dims):
         angle = -math.pi / 2 + i * math.tau / n
-        x, y = 310 + 137 * math.cos(angle), 210 + 137 * math.sin(angle)
-        lx, ly = 310 + 164 * math.cos(angle), 210 + 164 * math.sin(angle)
-        anchor = "middle" if abs(math.cos(angle)) < 0.1 else "start" if math.cos(angle) > 0 else "end"
-        parts.append(f'<line class="axis" x1="310" y1="210" x2="{x:.3f}" y2="{y:.3f}"/>' + svg_label(dim_label(dimension, lang), lx, ly, anchor))
+        cos_a, sin_a = math.cos(angle), math.sin(angle)
+        x, y = cx + radius * cos_a, cy + radius * sin_a
+        lx = cx + 158 * cos_a
+        ly = cy + 162 * sin_a
+        if sin_a < -0.85:
+            ly -= 14
+        elif sin_a > 0.85:
+            ly += 2
+        anchor = "middle" if abs(cos_a) < 0.1 else "start" if cos_a > 0 else "end"
+        dim_stat = stats["metrics"].get(dimension["id"], {}) if stats else None
+        dim_mean = dim_stat.get("mean") if dim_stat is not None else None
+        dim_n = dim_stat.get("n") if dim_stat is not None else None
+        parts.append(f'<line class="axis" x1="{cx}" y1="{cy}" x2="{x:.3f}" y2="{y:.3f}"/>' + svg_label(dim_label(dimension, lang), lx, ly, anchor, score=dim_mean, count_n=dim_n, planned_n=planned_n, max_width=w))
     if stats:
         for i, review in enumerate(data["panel"]["reviews"]):
             if review["status"] == "completed":
-                parts.append(plot_series([review["scores"].get(k) for k in dimension_ids], COLORS[i % len(COLORS)], 1.35, "model"))
+                parts.append(plot_series([review["scores"].get(k) for k in dimension_ids], COLORS[i % len(COLORS)], 1.55, "model", cx=cx, cy=cy, radius=radius))
         counts = [stats["metrics"].get(k, {}).get("n", 0) for k in dimension_ids]
-        planned_n = len(stats["planned_models"])
-        parts.append(plot_series([stats["metrics"].get(k, {}).get("mean") for k in dimension_ids], fg, 2.8, "mean", counts=counts, planned_n=planned_n))
+        parts.append(plot_series(
+            [stats["metrics"].get(k, {}).get("mean") for k in dimension_ids],
+            mean_color, 3.0, "mean", counts=counts, planned_n=planned_n,
+            cx=cx, cy=cy, radius=radius, fill="url(#radar-mean-fill)", stroke="url(#radar-mean-stroke)", draw_wedges=True,
+        ))
     parts.extend(legend)
     if data["synthetic"]:
-        parts.append(f'<text x="310" y="{footer_y}" text-anchor="middle" font-size="11">{esc(t["radar_synth_foot"])}</text>')
+        parts.append(f'<text x="{cx}" y="{footer_y}" text-anchor="middle" font-size="11">{esc(t["radar_synth_foot"])}</text>')
     parts.append('</svg>')
     return "".join(parts)
 
 
+def _nice_axis_ticks(max_val, target_ticks=5, integer_only=False):
+    if max_val <= 0:
+        return (4, [0, 1, 2, 3, 4]) if integer_only else (100.0, [0, 25, 50, 75, 100])
+    if integer_only:
+        if max_val <= 4:
+            top = max(4, int(math.ceil(max_val)))
+            return top, list(range(0, top + 1))
+        raw = max_val / max(1, target_ticks - 1)
+        mag = 10 ** int(math.floor(math.log10(raw)))
+        step = next(m * mag for m in (1, 2, 5, 10) if m * mag >= raw)
+        step = max(1, int(step))
+        top = int(math.ceil(max_val / step) * step)
+        return top, list(range(0, top + 1, step))
+    raw = max_val / max(1, target_ticks - 1)
+    mag = 10 ** int(math.floor(math.log10(raw)))
+    step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
+    top = math.ceil(max_val / step) * step
+    ticks = []
+    cur = 0.0
+    while cur <= top + step * 1e-6:
+        ticks.append(round(cur, 4))
+        cur += step
+    return top, ticks
+
+
+def _percentile(sorted_vals, p):
+    n = len(sorted_vals)
+    if n == 0:
+        return None
+    if n == 1:
+        return float(sorted_vals[0])
+    idx = (n - 1) * p
+    lo = math.floor(idx)
+    hi = math.ceil(idx)
+    if lo == hi:
+        return float(sorted_vals[lo])
+    return sorted_vals[lo] + (idx - lo) * (sorted_vals[hi] - sorted_vals[lo])
+
+
+def _five_num_summary(values):
+    vals = sorted(float(v) for v in values if finite(v) and v >= 0)
+    if not vals:
+        return None
+    return {
+        "n": len(vals),
+        "min": vals[0],
+        "q1": _percentile(vals, 0.25),
+        "median": _percentile(vals, 0.50),
+        "q3": _percentile(vals, 0.75),
+        "max": vals[-1],
+        "mean": sum(vals) / len(vals),
+        "values": vals,
+    }
+
+
+def _extract_verdict_counts(sub):
+    if not isinstance(sub, dict):
+        return None
+    cc = sub.get("categorical_counts")
+    if isinstance(cc, dict):
+        s = int(cc.get("supported") or 0)
+        m = int(cc.get("mixed") or 0)
+        c = int(cc.get("contradicted") or 0)
+        total = s + m + c
+        if total > 0:
+            return {"supported": s, "mixed": m, "contradicted": c, "other": 0, "total": total}
+    sr = sub.get("strict_support_rate")
+    if isinstance(sr, dict) and (sr.get("denominator") or 0) > 0:
+        s = int(sr.get("numerator") or 0)
+        total = int(sr.get("denominator") or 0)
+        return {"supported": s, "mixed": 0, "contradicted": 0, "other": max(0, total - s), "total": total}
+    return None
+
+
+def render_verdict_breakdown_svg(metrics, lang="zh"):
+    t = I18N[lang]
+    if not isinstance(metrics, dict):
+        return ""
+    groups = []
+    type_rows = []
+    overall = _extract_verdict_counts(metrics)
+    if overall:
+        type_rows.append((t["overall_label"], overall))
+    by_type = metrics.get("by_claim_type") or {}
+    seen_types = []
+    for ctype in ("factual", "prediction"):
+        if ctype in by_type:
+            seen_types.append(ctype)
+    for ctype in sorted(by_type):
+        if ctype not in seen_types:
+            seen_types.append(ctype)
+    for ctype in seen_types:
+        counts = _extract_verdict_counts(by_type.get(ctype))
+        if counts:
+            label = t["claim_types"].get(ctype, ctype)
+            type_rows.append((label, counts))
+    if type_rows:
+        groups.append((t["verdict_group_types"], type_rows))
+
+    pdiff = metrics.get("prediction_difficulty") or {}
+    diff_tiers = pdiff.get("by_tier") or {}
+    diff_rows = []
+    for tier_key in ("trivial", "moderate", "hard", "non_consensus", "unrated"):
+        counts = _extract_verdict_counts(diff_tiers.get(tier_key))
+        if counts:
+            label = t["difficulty_tiers_short"].get(tier_key, tier_key)
+            diff_rows.append((label, counts))
+    if diff_rows:
+        groups.append((t["verdict_group_difficulty"], diff_rows))
+
+    if not groups:
+        return ""
+
+    has_other = any(c["other"] > 0 for _, rows in groups for _, c in rows)
+    w = 720
+    bar_x, bar_w, bar_h = 178, 354, 22
+    row_step = 34
+    y = 42
+    parts = []
+    clip_defs = []
+    clip_idx = 0
+
+    for g_idx, (group_title, rows) in enumerate(groups):
+        if g_idx > 0:
+            y += 10
+            parts.append(f'<line class="viz-divider" x1="14" y1="{y - 8}" x2="{w - 14}" y2="{y - 8}"/>')
+            y += 8
+        parts.append(f'<text class="viz-group-label" x="14" y="{y}">{esc(group_title)}</text>')
+        y += 18
+        for label, counts in rows:
+            total = counts["total"]
+            s, m, c, o = counts["supported"], counts["mixed"], counts["contradicted"], counts["other"]
+            s_pct = s / total * 100
+            clip_id = f"vb-clip-{clip_idx}"
+            clip_idx += 1
+            clip_defs.append(f'<clipPath id="{clip_id}"><rect x="{bar_x}" y="{y}" width="{bar_w}" height="{bar_h}" rx="5"/></clipPath>')
+            tip_parts = [f"{label} (n={total}): {t['status']['supported']} {s} ({s_pct:.1f}%)"]
+            if m or c or not o:
+                tip_parts.append(f"{t['status']['mixed']} {m} ({m/total*100:.1f}%)")
+                tip_parts.append(f"{t['status']['contradicted']} {c} ({c/total*100:.1f}%)")
+            if o:
+                tip_parts.append(f"{t['other_unsplit']} {o} ({o/total*100:.1f}%)")
+            row_svg = [f'<g><title>{esc(" · ".join(tip_parts))}</title>']
+            row_svg.append(f'<text class="viz-row-label" x="{bar_x - 10}" y="{y + bar_h/2 + 0.5:.1f}" text-anchor="end" dominant-baseline="middle">{esc(label)} <tspan class="viz-n-sub">(n={total})</tspan></text>')
+            row_svg.append(f'<rect class="viz-track" x="{bar_x}" y="{y}" width="{bar_w}" height="{bar_h}" rx="5"/>')
+            segs = [
+                (s, VIZ["supported"], f"{s/total*100:.0f}%"),
+                (m, VIZ["mixed"], f"{m/total*100:.0f}%"),
+                (c, VIZ["contradicted"], f"{c/total*100:.0f}%"),
+                (o, VIZ["other"], f"{o/total*100:.0f}%"),
+            ]
+            row_svg.append(f'<g clip-path="url(#{clip_id})">')
+            cur_x = float(bar_x)
+            for seg_val, color, pct_txt in segs:
+                if seg_val <= 0:
+                    continue
+                seg_w = bar_w * seg_val / total
+                row_svg.append(f'<rect x="{cur_x:.2f}" y="{y}" width="{seg_w:.2f}" height="{bar_h}" fill="{color}"/>')
+                if seg_w >= 40:
+                    row_svg.append(f'<text class="viz-bar-pct" x="{cur_x + seg_w/2:.2f}" y="{y + bar_h/2 + 0.5:.1f}" text-anchor="middle" dominant-baseline="middle">{esc(pct_txt)}</text>')
+                cur_x += seg_w
+            row_svg.append('</g>')
+            # Right-hand numeric readout
+            detail = f"{s}/{m}/{c}" if o == 0 else f"{s}/{total}"
+            row_svg.append(
+                f'<text class="viz-stat-val" x="{bar_x + bar_w + 12}" y="{y + bar_h/2 + 0.5:.1f}" dominant-baseline="middle">'
+                f'{s_pct:.1f}% <tspan class="viz-stat-sub">({esc(detail)})</tspan></text>'
+            )
+            row_svg.append('</g>')
+            parts.append("".join(row_svg))
+            y += row_step
+
+    height = y + 10
+    legend_items = [
+        (t["status"]["supported"], VIZ["supported"]),
+        (t["status"]["mixed"], VIZ["mixed"]),
+        (t["status"]["contradicted"], VIZ["contradicted"]),
+    ]
+    if has_other:
+        legend_items.append((t["other_unsplit"], VIZ["other"]))
+    lx = 14
+    legend_svg = []
+    for lbl, col in legend_items:
+        legend_svg.append(f'<rect x="{lx}" y="11" width="11" height="11" rx="3" fill="{col}"/><text class="viz-legend-text" x="{lx + 16}" y="17" dominant-baseline="middle">{esc(lbl)}</text>')
+        lx += 28 + _text_units(lbl) * 7.2
+    header_hint = "S / M / C" if not has_other else "S / N"
+    legend_svg.append(f'<text class="viz-legend-text" x="{w - 14}" y="17" text-anchor="end" dominant-baseline="middle">{esc(header_hint)}</text>')
+    return (
+        f'<svg class="viz-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {height}" role="img" aria-labelledby="vb-title vb-desc">'
+        f'<title id="vb-title">{esc(t["verdict_chart_title"])}</title>'
+        f'<desc id="vb-desc">{esc(t["verdict_chart_desc"])}</desc>'
+        f'<defs>{"".join(clip_defs)}</defs>'
+        f'{"".join(legend_svg)}{"".join(parts)}</svg>'
+    )
+
+
+def render_difficulty_accuracy_svg(metrics, lang="zh"):
+    t = I18N[lang]
+    pdiff = (metrics or {}).get("prediction_difficulty") or {}
+    diff_tiers = pdiff.get("by_tier") or {}
+    if not pdiff.get("rated_n") or not diff_tiers:
+        return ""
+    tiers = ["trivial", "moderate", "hard", "non_consensus"]
+    unrated_sub = diff_tiers.get("unrated") or {}
+    if (unrated_sub.get("strict_support_rate") or {}).get("denominator"):
+        tiers.append("unrated")
+
+    w, h = 680, 316
+    left, right, top, bottom = 58, 650, 48, 232
+    plot_w, plot_h = right - left, bottom - top
+    slot_w = plot_w / len(tiers)
+    bar_w = min(74.0, slot_w * 0.48)
+
+    defs = ['<defs>']
+    for tk in tiers:
+        c_top, c_bot = DIFF_TIER_COLORS.get(tk, ("#94A3B8", "#64748B"))
+        defs.append(f'<linearGradient id="diff-grad-{tk}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="{c_top}"/><stop offset="100%" stop-color="{c_bot}"/></linearGradient>')
+    defs.append('</defs>')
+
+    parts = []
+    # Horizontal gridlines at 0..100%
+    for pct in (0, 25, 50, 75, 100):
+        gy = bottom - plot_h * pct / 100
+        cls = "viz-axis-base" if pct == 0 else "viz-grid"
+        parts.append(f'<line class="{cls}" x1="{left}" y1="{gy:.2f}" x2="{right}" y2="{gy:.2f}"/>')
+        parts.append(f'<text class="viz-axis-tick" x="{left - 8}" y="{gy + 0.5:.2f}" text-anchor="end" dominant-baseline="middle">{pct}%</text>')
+
+    # Non-trivial reference line
+    nt_sr = pdiff.get("non_trivial_strict_support_rate") or {}
+    nt_val = nt_sr.get("value")
+    if nt_val is not None and nt_sr.get("denominator"):
+        nt_y = bottom - plot_h * nt_val
+        parts.append(f'<line class="viz-ref-line" x1="{left}" y1="{nt_y:.2f}" x2="{right}" y2="{nt_y:.2f}"/>')
+        ref_lbl = f'{t["diff_nontrivial_ref"]} {nt_val * 100:.1f}%'
+        pill_w = max(84, _text_units(ref_lbl) * 6.8 + 14)
+        parts.append(
+            f'<g class="viz-ref-pill"><rect x="{right - pill_w:.1f}" y="{nt_y - 19:.1f}" width="{pill_w:.1f}" height="17" rx="4"/>'
+            f'<text x="{right - pill_w / 2:.1f}" y="{nt_y - 10:.1f}" text-anchor="middle" dominant-baseline="middle">{esc(ref_lbl)}</text></g>'
+        )
+
+    trend_pts = []
+    has_ci = False
+    for idx, tk in enumerate(tiers):
+        cx = left + (idx + 0.5) * slot_w
+        sub = diff_tiers.get(tk) or {}
+        sr = sub.get("strict_support_rate") or {}
+        denom = int(sr.get("denominator") or 0)
+        num = int(sr.get("numerator") or 0)
+        val = sr.get("value")
+        total_claims = int(sub.get("total_canonical_claims") or 0)
+        mean_score = sub.get("mean_difficulty_score")
+        tier_label = t["difficulty_tiers_short"].get(tk, tk)
+        full_label = t["difficulty_tiers"].get(tk, tk)
+        bx = cx - bar_w / 2
+
+        if denom > 0 and val is not None:
+            bh = max(2.0, plot_h * val)
+            by = bottom - bh
+            ci = sr.get("ci_95")
+            tip = f"{full_label}: {val*100:.1f}% ({num}/{denom})"
+            if ci:
+                tip += f" · 95% Wilson [{ci['low']*100:.1f}%, {ci['high']*100:.1f}%]"
+            parts.append(f'<g><title>{esc(tip)}</title><rect x="{bx:.2f}" y="{by:.2f}" width="{bar_w:.2f}" height="{bh:.2f}" rx="6" fill="url(#diff-grad-{tk})"/>')
+            label_top_y = by - 10
+            if ci and finite(ci.get("low")) and finite(ci.get("high")):
+                has_ci = True
+                ci_hi_y = bottom - plot_h * max(0.0, min(1.0, ci["high"]))
+                ci_lo_y = bottom - plot_h * max(0.0, min(1.0, ci["low"]))
+                parts.append(
+                    f'<line class="viz-ci" x1="{cx:.2f}" y1="{ci_hi_y:.2f}" x2="{cx:.2f}" y2="{ci_lo_y:.2f}"/>'
+                    f'<line class="viz-ci" x1="{cx - 5:.2f}" y1="{ci_hi_y:.2f}" x2="{cx + 5:.2f}" y2="{ci_hi_y:.2f}"/>'
+                    f'<line class="viz-ci" x1="{cx - 5:.2f}" y1="{ci_lo_y:.2f}" x2="{cx + 5:.2f}" y2="{ci_lo_y:.2f}"/>'
+                )
+                label_top_y = min(label_top_y, ci_hi_y - 8)
+            label_top_y = max(top - 4, label_top_y)
+            parts.append(f'<text class="viz-bar-val" x="{cx:.2f}" y="{label_top_y - 9:.2f}" text-anchor="middle">{val*100:.1f}%</text>')
+            parts.append(f'<text class="viz-bar-sub" x="{cx:.2f}" y="{label_top_y + 3:.2f}" text-anchor="middle">({num}/{denom})</text></g>')
+            if tk != "unrated":
+                trend_pts.append((cx, by))
+        else:
+            parts.append(
+                f'<g><title>{esc(full_label)}: n=0</title>'
+                f'<rect class="viz-empty-bar" x="{bx:.2f}" y="{bottom - 20:.2f}" width="{bar_w:.2f}" height="20" rx="4"/>'
+                f'<text class="viz-bar-sub" x="{cx:.2f}" y="{bottom - 28:.2f}" text-anchor="middle">n=0</text></g>'
+            )
+
+        parts.append(f'<text class="viz-x-label" x="{cx:.2f}" y="{bottom + 20}" text-anchor="middle">{esc(tier_label)}</text>')
+        sub_bits = []
+        if total_claims:
+            sub_bits.append(f"n={total_claims}")
+        if mean_score is not None:
+            sub_bits.append(f"{mean_score:.1f}/5")
+        if sub_bits:
+            parts.append(f'<text class="viz-x-sub" x="{cx:.2f}" y="{bottom + 36}" text-anchor="middle">{esc(" · ".join(sub_bits))}</text>')
+
+    if len(trend_pts) >= 2:
+        pts_str = " ".join(f"{x:.2f},{y:.2f}" for x, y in trend_pts)
+        parts.append(f'<polyline class="viz-trend-line" points="{pts_str}" fill="none"/>')
+        for x, y in trend_pts:
+            parts.append(f'<circle class="viz-trend-dot" cx="{x:.2f}" cy="{y:.2f}" r="4.2"/>')
+
+    # Legend at bottom
+    leg_y = h - 16
+    leg_items = []
+    if len(trend_pts) >= 2:
+        leg_items.append(f'<line class="viz-trend-line" x1="58" y1="{leg_y}" x2="82" y2="{leg_y}"/><circle class="viz-trend-dot" cx="70" cy="{leg_y}" r="3.4"/><text class="viz-legend-text" x="88" y="{leg_y + 0.5}" dominant-baseline="middle">{esc(t["diff_trend_legend"])}</text>')
+    if has_ci:
+        cx_leg = 228 if len(trend_pts) >= 2 else 58
+        leg_items.append(f'<line class="viz-ci" x1="{cx_leg}" y1="{leg_y - 5}" x2="{cx_leg}" y2="{leg_y + 5}"/><line class="viz-ci" x1="{cx_leg - 4}" y1="{leg_y - 5}" x2="{cx_leg + 4}" y2="{leg_y - 5}"/><line class="viz-ci" x1="{cx_leg - 4}" y1="{leg_y + 5}" x2="{cx_leg + 4}" y2="{leg_y + 5}"/><text class="viz-legend-text" x="{cx_leg + 10}" y="{leg_y + 0.5}" dominant-baseline="middle">{esc(t["diff_ci_legend"])}</text>')
+
+    return (
+        f'<svg class="viz-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" role="img" aria-labelledby="diff-chart-title diff-chart-desc">'
+        f'<title id="diff-chart-title">{esc(t["diff_chart_title"])}</title>'
+        f'<desc id="diff-chart-desc">{esc(t["diff_chart_desc"])}</desc>'
+        f'{"".join(defs)}{"".join(parts)}{"".join(leg_items)}</svg>'
+    )
+
+
+def render_horizon_histogram_svg(phor, lang="zh"):
+    t = I18N[lang]
+    hbuckets = (phor or {}).get("buckets") or {}
+    if not (phor or {}).get("dated_n") or not hbuckets:
+        return ""
+    order = ("le_30d", "31_90d", "91_180d", "181_365d", "gt_365d")
+    counts_list = [int((hbuckets.get(k) or {}).get("count") or 0) for k in order]
+    max_count = max(counts_list) if counts_list else 0
+    if max_count <= 0:
+        return ""
+    y_max, y_ticks = _nice_axis_ticks(max_count, target_ticks=5, integer_only=True)
+    any_cat_split = any(isinstance((hbuckets.get(k) or {}).get("categorical_counts"), dict) for k in order)
+
+    w, h = 680, 326
+    left, right, top, bottom = 54, 622, 54, 240
+    plot_w, plot_h = right - left, bottom - top
+    slot_w = plot_w / len(order)
+    bar_w = min(68.0, slot_w * 0.52)
+
+    defs = [
+        '<defs>',
+        '<linearGradient id="hor-grad-single" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0%" stop-color="#38BDF8"/><stop offset="100%" stop-color="#4F46E5"/></linearGradient>',
+    ]
+    parts = []
+    # Left Y-axis (count) gridlines & ticks
+    for tick in y_ticks:
+        gy = bottom - plot_h * tick / y_max
+        cls = "viz-axis-base" if tick == 0 else "viz-grid"
+        parts.append(f'<line class="{cls}" x1="{left}" y1="{gy:.2f}" x2="{right}" y2="{gy:.2f}"/>')
+        parts.append(f'<text class="viz-axis-tick" x="{left - 8}" y="{gy + 0.5:.2f}" text-anchor="end" dominant-baseline="middle">{tick}</text>')
+    # Right Y-axis (accuracy 0-100%)
+    for pct in (0, 25, 50, 75, 100):
+        gy = bottom - plot_h * pct / 100
+        parts.append(f'<text class="viz-axis-tick viz-axis-rate" x="{right + 8}" y="{gy + 0.5:.2f}" text-anchor="start" dominant-baseline="middle">{pct}%</text>')
+    # Axis titles
+    parts.append(f'<text class="viz-axis-title" x="{left}" y="{top - 14}" text-anchor="start">{esc(t["horizon_axis_count"])}</text>')
+    parts.append(f'<text class="viz-axis-title viz-axis-rate" x="{right}" y="{top - 14}" text-anchor="end">{esc(t["horizon_axis_rate"])}</text>')
+
+    acc_pts = []
+    for idx, bkey in enumerate(order):
+        cx = left + (idx + 0.5) * slot_w
+        bdata = hbuckets.get(bkey) or {}
+        cnt = int(bdata.get("count") or 0)
+        sr = bdata.get("strict_support_rate") or {}
+        sr_val = sr.get("value")
+        sr_den = int(sr.get("denominator") or 0)
+        sr_num = int(sr.get("numerator") or 0)
+        blabel = t["horizon_buckets"].get(bkey, bkey)
+        avg_d = bdata.get("mean_lead_time_days")
+        bx = cx - bar_w / 2
+
+        if cnt > 0:
+            total_bh = max(3.0, plot_h * cnt / y_max)
+            top_y = bottom - total_bh
+            clip_id = f"hor-clip-{idx}"
+            defs.append(f'<clipPath id="{clip_id}"><rect x="{bx:.2f}" y="{top_y:.2f}" width="{bar_w:.2f}" height="{total_bh:.2f}" rx="5"/></clipPath>')
+            tip = f"{blabel}: n={cnt}"
+            if sr_den and sr_val is not None:
+                tip += f" · {t['strict_support']}: {sr_val*100:.1f}% ({sr_num}/{sr_den})"
+            if avg_d is not None:
+                tip += f" · {t['horizon_avg_prefix']} {avg_d:.1f}d"
+            parts.append(f'<g><title>{esc(tip)}</title><g clip-path="url(#{clip_id})">')
+            cc = bdata.get("categorical_counts")
+            if isinstance(cc, dict) and sum(int(cc.get(k) or 0) for k in ("supported", "mixed", "contradicted")) > 0:
+                s = int(cc.get("supported") or 0)
+                m = int(cc.get("mixed") or 0)
+                c = int(cc.get("contradicted") or 0)
+                rem = max(0, cnt - s - m - c)
+                cur_bottom = float(bottom)
+                for seg_n, col in ((s, VIZ["supported"]), (m, VIZ["mixed"]), (c, VIZ["contradicted"]), (rem, VIZ["pending"])):
+                    if seg_n <= 0:
+                        continue
+                    seg_h = total_bh * seg_n / cnt
+                    parts.append(f'<rect x="{bx:.2f}" y="{cur_bottom - seg_h:.2f}" width="{bar_w:.2f}" height="{seg_h + 0.5:.2f}" fill="{col}"/>')
+                    cur_bottom -= seg_h
+            else:
+                parts.append(f'<rect x="{bx:.2f}" y="{top_y:.2f}" width="{bar_w:.2f}" height="{total_bh:.2f}" fill="url(#hor-grad-single)"/>')
+            parts.append('</g>')
+            # Count label cleanly inside top of bar if tall enough, else above bar
+            if total_bh >= 22:
+                parts.append(f'<text class="viz-bar-pct" x="{cx:.2f}" y="{bottom - 10:.2f}" text-anchor="middle">n={cnt}</text>')
+            else:
+                parts.append(f'<text class="viz-bar-sub" x="{cx:.2f}" y="{top_y - 6:.2f}" text-anchor="middle">n={cnt}</text>')
+            parts.append('</g>')
+        else:
+            parts.append(f'<rect class="viz-empty-bar" x="{bx:.2f}" y="{bottom - 10:.2f}" width="{bar_w:.2f}" height="10" rx="3"/><text class="viz-bar-sub" x="{cx:.2f}" y="{bottom - 15:.2f}" text-anchor="middle">0</text>')
+
+        if sr_den > 0 and sr_val is not None:
+            ay = bottom - plot_h * sr_val
+            acc_pts.append((cx, ay, sr_val, sr_num, sr_den, blabel))
+
+        parts.append(f'<text class="viz-x-label" x="{cx:.2f}" y="{bottom + 20}" text-anchor="middle">{esc(blabel)}</text>')
+        if avg_d is not None:
+            parts.append(f'<text class="viz-x-sub" x="{cx:.2f}" y="{bottom + 36}" text-anchor="middle">{esc(t["horizon_avg_prefix"])} {avg_d:.0f}d</text>')
+
+    defs.append('</defs>')
+
+    # Accuracy overlay polyline + floating pills
+    if acc_pts:
+        if len(acc_pts) >= 2:
+            pts_str = " ".join(f"{x:.2f},{y:.2f}" for x, y, *_ in acc_pts)
+            parts.append(f'<polyline class="viz-acc-line" points="{pts_str}" fill="none"/>')
+        for x, y, val, num, den, blabel in acc_pts:
+            pill_y = y - 16 if y > top + 20 else y + 18
+            pill_txt = f"{val*100:.0f}%"
+            pw = 38 if len(pill_txt) <= 3 else 44
+            parts.append(
+                f'<g><title>{esc(blabel)}: {val*100:.1f}% ({num}/{den})</title>'
+                f'<circle class="viz-acc-dot" cx="{x:.2f}" cy="{y:.2f}" r="4.8"/>'
+                f'<rect class="viz-acc-pill-bg" x="{x - pw/2:.1f}" y="{pill_y - 9:.1f}" width="{pw}" height="17" rx="8.5"/>'
+                f'<text class="viz-acc-pill-text" x="{x:.1f}" y="{pill_y + 0.5:.1f}" text-anchor="middle" dominant-baseline="middle">{esc(pill_txt)}</text></g>'
+            )
+
+    # Top legend
+    leg_items = []
+    if any_cat_split:
+        leg_items.extend([
+            ("rect", t["status"]["supported"], VIZ["supported"]),
+            ("rect", t["status"]["mixed"], VIZ["mixed"]),
+            ("rect", t["status"]["contradicted"], VIZ["contradicted"]),
+            ("rect", t["horizon_pending_other"], VIZ["pending"]),
+        ])
+    else:
+        leg_items.append(("rect", t["horizon_axis_count"], "#4F46E5"))
+    leg_items.append(("line", t["horizon_axis_rate"], VIZ["indigo"]))
+    lx = left
+    leg_svg = []
+    for kind, lbl, col in leg_items:
+        if kind == "rect":
+            leg_svg.append(f'<rect x="{lx:.1f}" y="11" width="10" height="10" rx="2.5" fill="{col}"/><text class="viz-legend-text" x="{lx + 15:.1f}" y="16.5" dominant-baseline="middle">{esc(lbl)}</text>')
+            lx += 26 + _text_units(lbl) * 6.8
+        else:
+            leg_svg.append(f'<line class="viz-acc-line" x1="{lx:.1f}" y1="16" x2="{lx + 18:.1f}" y2="16"/><circle class="viz-acc-dot" cx="{lx + 9:.1f}" cy="16" r="3.4"/><text class="viz-legend-text" x="{lx + 24:.1f}" y="16.5" dominant-baseline="middle">{esc(lbl)}</text>')
+            lx += 34 + _text_units(lbl) * 6.8
+
+    return (
+        f'<svg class="viz-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" role="img" aria-labelledby="hor-hist-title hor-hist-desc">'
+        f'<title id="hor-hist-title">{esc(t["horizon_hist_title"])}</title>'
+        f'<desc id="hor-hist-desc">{esc(t["horizon_hist_desc"])}</desc>'
+        f'{"".join(defs)}{"".join(leg_svg)}{"".join(parts)}</svg>'
+    )
+
+
+def render_horizon_boxplot_html(data, lang="zh"):
+    t = I18N[lang]
+    cases = data.get("cases") or []
+    supported_vals, not_supported_vals, all_vals = [], [], []
+    for case in cases:
+        lt = case.get("lead_time_days")
+        if not finite(lt) or lt < 0:
+            continue
+        ctype = case.get("claim_type")
+        if ctype is not None and ctype != "prediction":
+            continue
+        val = float(lt)
+        all_vals.append(val)
+        st = case.get("status")
+        if st == "supported":
+            supported_vals.append(val)
+        elif st in {"contradicted", "mixed"}:
+            not_supported_vals.append(val)
+
+    # Also allow optional precomputed distributions on metrics.prediction_horizon if cases are absent
+    if len(all_vals) < 3:
+        phor = (data.get("metrics") or {}).get("prediction_horizon") or {}
+        by_out = phor.get("lead_time_samples") or {}
+        if isinstance(by_out, dict):
+            s_extra = [float(v) for v in (by_out.get("supported") or []) if finite(v) and v >= 0]
+            ns_extra = [float(v) for v in (by_out.get("not_supported") or []) if finite(v) and v >= 0]
+            all_extra = [float(v) for v in (by_out.get("all") or []) if finite(v) and v >= 0] or (s_extra + ns_extra)
+            if len(all_extra) >= 3:
+                supported_vals, not_supported_vals, all_vals = s_extra, ns_extra, all_extra
+
+    if len(all_vals) < 3:
+        return f'<div class="chart-empty">{esc(t["boxplot_empty"].format(n=len(all_vals)))}</div>'
+
+    rows = [
+        (t["boxplot_supported"], _five_num_summary(supported_vals), VIZ["supported"], VIZ["supported_dark"]),
+        (t["boxplot_not_supported"], _five_num_summary(not_supported_vals), VIZ["contradicted"], VIZ["contradicted_dark"]),
+        (t["boxplot_all"], _five_num_summary(all_vals), VIZ["indigo"], VIZ["violet"]),
+    ]
+    max_val = max(all_vals)
+    x_max, x_ticks = _nice_axis_ticks(max(max_val, 10.0), target_ticks=5, integer_only=False)
+
+    w = 720
+    left, right = 158, 536
+    plot_w = right - left
+    top = 34
+    row_h = 54
+    bottom = top + len(rows) * row_h
+    height = bottom + 64
+
+    def sx(v):
+        return left + plot_w * (v / x_max)
+
+    parts = []
+    # Vertical gridlines + X-axis ticks
+    for tick in x_ticks:
+        gx = sx(tick)
+        cls = "viz-axis-base" if tick == 0 else "viz-grid"
+        parts.append(f'<line class="{cls}" x1="{gx:.2f}" y1="{top - 6}" x2="{gx:.2f}" y2="{bottom}"/>')
+        parts.append(f'<text class="viz-axis-tick" x="{gx:.2f}" y="{bottom + 15}" text-anchor="middle">{tick:g}d</text>')
+    parts.append(f'<line class="viz-axis-base" x1="{left}" y1="{bottom}" x2="{right}" y2="{bottom}"/>')
+    parts.append(f'<text class="viz-axis-title" x="{(left + right)/2:.1f}" y="{bottom + 32}" text-anchor="middle">{esc(t["boxplot_axis_days"])}</text>')
+
+    for idx, (label, stat, fill_col, stroke_col) in enumerate(rows):
+        cy = top + idx * row_h + row_h / 2
+        n_val = stat["n"] if stat else 0
+        parts.append(f'<text class="viz-row-label" x="{left - 12}" y="{cy - 5:.1f}" text-anchor="end" dominant-baseline="middle">{esc(label)}</text>')
+        parts.append(f'<text class="viz-n-sub" x="{left - 12}" y="{cy + 10:.1f}" text-anchor="end" dominant-baseline="middle">n = {n_val}</text>')
+        if stat is None:
+            parts.append(f'<line class="viz-empty-track" x1="{left}" y1="{cy:.1f}" x2="{right}" y2="{cy:.1f}"/>')
+            parts.append(f'<text class="viz-bar-sub" x="{right + 12}" y="{cy:.1f}" dominant-baseline="middle">—</text>')
+            continue
+
+        x_min, x_q1, x_med, x_q3, x_max_v, x_mean = (sx(stat[k]) for k in ("min", "q1", "median", "q3", "max", "mean"))
+        box_w = max(3.0, x_q3 - x_q1)
+        box_x = x_q1 if x_q3 - x_q1 >= 3.0 else x_q1 - 1.5
+        tip = (
+            f"{label} (n={n_val}): min={stat['min']:.0f}d, Q1={stat['q1']:.0f}d, "
+            f"median={stat['median']:.0f}d, Q3={stat['q3']:.0f}d, max={stat['max']:.0f}d, mean={stat['mean']:.1f}d"
+        )
+        g = [f'<g><title>{esc(tip)}</title>']
+        # Whiskers & caps
+        g.append(f'<line x1="{x_min:.2f}" y1="{cy:.1f}" x2="{x_max_v:.2f}" y2="{cy:.1f}" stroke="{stroke_col}" stroke-width="1.8"/>')
+        g.append(f'<line x1="{x_min:.2f}" y1="{cy - 7:.1f}" x2="{x_min:.2f}" y2="{cy + 7:.1f}" stroke="{stroke_col}" stroke-width="1.8"/>')
+        g.append(f'<line x1="{x_max_v:.2f}" y1="{cy - 7:.1f}" x2="{x_max_v:.2f}" y2="{cy + 7:.1f}" stroke="{stroke_col}" stroke-width="1.8"/>')
+        # IQR box
+        g.append(f'<rect x="{box_x:.2f}" y="{cy - 13:.1f}" width="{box_w:.2f}" height="26" rx="4" fill="{fill_col}" fill-opacity="0.24" stroke="{stroke_col}" stroke-width="2"/>')
+        # Individual points (if <= 50)
+        if len(stat["values"]) <= 50:
+            for pi, pv in enumerate(stat["values"]):
+                px = sx(pv)
+                py = cy + (((pi % 5) - 2) * 3.2)
+                g.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="2.2" fill="{stroke_col}" fill-opacity="0.45"/>')
+        # Median line
+        g.append(f'<line x1="{x_med:.2f}" y1="{cy - 13:.1f}" x2="{x_med:.2f}" y2="{cy + 13:.1f}" stroke="{stroke_col}" stroke-width="3.2" stroke-linecap="round"/>')
+        # Mean diamond marker
+        dm = f"{x_mean:.2f},{cy - 5.5:.2f} {x_mean + 5.5:.2f},{cy:.2f} {x_mean:.2f},{cy + 5.5:.2f} {x_mean - 5.5:.2f},{cy:.2f}"
+        g.append(f'<polygon class="viz-mean-diamond" points="{dm}" fill="{VIZ["mixed"]}" stroke="#FFFFFF" stroke-width="1.4"/>')
+        # Right numeric summary
+        g.append(
+            f'<text class="viz-stat-val" x="{right + 12}" y="{cy - 6:.1f}" dominant-baseline="middle">'
+            f'{esc(t["boxplot_stat_med"])} {stat["median"]:.0f}d · {esc(t["boxplot_stat_mean"])} {stat["mean"]:.0f}d</text>'
+        )
+        g.append(
+            f'<text class="viz-stat-sub" x="{right + 12}" y="{cy + 10:.1f}" dominant-baseline="middle">'
+            f'IQR {stat["q1"]:.0f}–{stat["q3"]:.0f}d · [{stat["min"]:.0f}, {stat["max"]:.0f}]</text>'
+        )
+        g.append('</g>')
+        parts.append("".join(g))
+
+    # Legend at bottom
+    ly = height - 14
+    lx = left
+    legend_parts = []
+    # Whisker
+    legend_parts.append(f'<line x1="{lx}" y1="{ly}" x2="{lx + 18}" y2="{ly}" stroke="#64748B" stroke-width="1.8"/><line x1="{lx}" y1="{ly - 4}" x2="{lx}" y2="{ly + 4}" stroke="#64748B" stroke-width="1.8"/><line x1="{lx + 18}" y1="{ly - 4}" x2="{lx + 18}" y2="{ly + 4}" stroke="#64748B" stroke-width="1.8"/><text class="viz-legend-text" x="{lx + 24}" y="{ly + 0.5}" dominant-baseline="middle">{esc(t["boxplot_legend_whisker"])}</text>')
+    lx += 36 + _text_units(t["boxplot_legend_whisker"]) * 6.8
+    # Box
+    legend_parts.append(f'<rect x="{lx:.1f}" y="{ly - 5}" width="16" height="10" rx="2" fill="#10B981" fill-opacity="0.24" stroke="#059669" stroke-width="1.6"/><text class="viz-legend-text" x="{lx + 22:.1f}" y="{ly + 0.5}" dominant-baseline="middle">{esc(t["boxplot_legend_iqr"])}</text>')
+    lx += 34 + _text_units(t["boxplot_legend_iqr"]) * 6.8
+    # Median
+    legend_parts.append(f'<line x1="{lx:.1f}" y1="{ly - 6}" x2="{lx:.1f}" y2="{ly + 6}" stroke="#0F172A" stroke-width="3" class="viz-leg-med"/><text class="viz-legend-text" x="{lx + 8:.1f}" y="{ly + 0.5}" dominant-baseline="middle">{esc(t["boxplot_legend_median"])}</text>')
+    lx += 20 + _text_units(t["boxplot_legend_median"]) * 6.8
+    # Mean diamond
+    dm_l = f"{lx + 5:.1f},{ly - 5:.1f} {lx + 10:.1f},{ly:.1f} {lx + 5:.1f},{ly + 5:.1f} {lx:.1f},{ly:.1f}"
+    legend_parts.append(f'<polygon points="{dm_l}" fill="#F59E0B" stroke="#FFFFFF" stroke-width="1.2"/><text class="viz-legend-text" x="{lx + 16:.1f}" y="{ly + 0.5}" dominant-baseline="middle">{esc(t["boxplot_legend_mean"])}</text>')
+
+    return (
+        f'<svg class="viz-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {height}" role="img" aria-labelledby="bp-title bp-desc">'
+        f'<title id="bp-title">{esc(t["boxplot_title"])}</title>'
+        f'<desc id="bp-desc">{esc(t["boxplot_desc"])}</desc>'
+        f'{"".join(parts)}{"".join(legend_parts)}</svg>'
+    )
+
+
 CSS = r'''
-*{box-sizing:border-box}h1,h2,h3,.stance,.reason-meta,.metadata,.synthetic,.topic-index,.judge-label,.badge,.top-meta{overflow-wrap:anywhere;min-width:0}.legend-item{max-width:100%;overflow-wrap:anywhere}html{scroll-behavior:auto;scroll-padding-top:24px}body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font);font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:4px}p{margin:0 0 10px;overflow-wrap:anywhere}ul{padding-left:19px;margin:8px 0}li{margin:5px 0;overflow-wrap:anywhere}.shell{max-width:1280px;margin:0 auto;padding:24px 32px 56px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 0 20px;border-bottom:1px solid var(--border);margin-bottom:30px;font-size:12px;color:var(--muted)}.brand{display:flex;gap:9px;align-items:center;font-weight:650;color:var(--foreground);letter-spacing:.055em}.mark{display:grid;place-items:center;width:25px;height:25px;border:1px solid var(--border);border-radius:6px;font-size:14px}.top-meta{font-size:11px;text-align:right}.layout{display:grid;grid-template-columns:156px minmax(0,1fr);gap:32px}.sidebar{position:sticky;top:24px;align-self:start;font-size:12px}.nav-title{font-size:11px;letter-spacing:.10em;color:var(--muted);margin:0 0 12px;font-weight:650}.sidebar a{display:block;color:var(--muted);padding:8px 10px;margin:2px 0;border-radius:6px}.sidebar a:first-of-type{color:var(--foreground);background:var(--subtle);font-weight:600}.sidebar .side-note{margin:27px 10px 0;color:var(--muted);font-size:11px;line-height:1.8}.content{min-width:0}.eyebrow{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.04em;margin-bottom:8px}h1{font-size:28px;line-height:1.35;letter-spacing:-.035em;margin:0 0 10px;font-weight:680}h2{font-size:17px;letter-spacing:-.02em;line-height:1.4;margin:0;font-weight:650}h3{font-size:14px;margin:0 0 5px;font-weight:650}.subtitle{font-size:13px;color:var(--muted);max-width:78ch}.metadata{display:flex;flex-wrap:wrap;gap:7px 14px;color:var(--muted);font-size:11px;margin:14px 0 23px}.badge{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);border-radius:5px;padding:2px 7px;font-size:11px;font-weight:550;line-height:1.5;white-space:normal;color:var(--muted);background:var(--surface)}.badge.accent{color:var(--accent)}.badge.ok{color:var(--foreground)}.badge.negative{color:#BE414B}@media(prefers-color-scheme:dark){.badge.negative{color:#F87171}}.synthetic{display:flex;gap:8px;align-items:baseline;padding:10px 13px;border:1px solid var(--border);background:var(--surface);border-radius:var(--radius);margin:18px 0;font-size:11px;color:var(--muted)}.synthetic strong{color:var(--foreground);font-weight:600}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.metric{min-width:0;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);padding:16px 16px 14px}.metric-label{color:var(--muted);font-size:11px}.metric-value{font-size:28px;font-weight:650;letter-spacing:-.04em;line-height:1.2;margin:8px 0;font-variant-numeric:tabular-nums}.metric-note{font-size:11px;color:var(--muted);line-height:1.55}.disclosures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:20px}.section{margin-top:28px;scroll-margin-top:24px}.section-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:13px}.section-description{font-size:11px;color:var(--muted);margin-top:5px}.card{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden}.card-header{padding:18px 20px 0}.card-content{padding:18px 20px}.card-footer{border-top:1px solid var(--border);padding:12px 20px;font-size:11px;color:var(--muted)}.summary{font-size:13px;line-height:1.9}.summary .summary-label{display:block;font-size:11px;font-weight:650;letter-spacing:.08em;color:var(--muted);margin-bottom:9px}.radar-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(210px,1fr);align-items:center}.radar-wrap{padding:12px 0 0;min-width:0}.radar-wrap svg{display:block;width:100%;height:auto}.radar-note{padding:20px 22px 20px 4px;font-size:12px;color:var(--muted)}.legend{display:flex;gap:9px 17px;flex-wrap:wrap;font-size:11px;margin:5px 20px 17px;color:var(--muted)}.legend-item{display:flex;align-items:center;gap:7px}.legend-line{width:18px;border-top:2px solid;flex:0 0 auto}.legend-line.mean-line{border-top:3px solid var(--foreground)}.mini-stat{border-top:1px solid var(--border);padding-top:12px;margin-top:14px}.mini-stat strong{display:block;font-size:20px;color:var(--foreground);font-weight:600;margin:3px 0;font-variant-numeric:tabular-nums}.table-wrap{overflow:auto;max-width:100%}table{border-collapse:collapse;width:100%;font-size:12px;min-width:650px}caption{text-align:left;color:var(--muted);padding:12px 20px 8px;font-size:11px}th,td{border-bottom:1px solid var(--border);padding:11px 12px;text-align:right;vertical-align:top;font-variant-numeric:tabular-nums}th{font-weight:550;color:var(--muted);background:var(--subtle);font-size:11px}th:first-child,td:first-child{text-align:left;min-width:148px;padding-left:20px}th:last-child,td:last-child{padding-right:20px}tbody tr:last-child td{border-bottom:0}.mean-cell{font-weight:650;color:var(--foreground)}.dim-label{display:block;color:var(--foreground);font-weight:550}.n-note{color:var(--muted);font-size:11px;margin-top:2px}details{border-top:1px solid var(--border)}summary{cursor:pointer;padding:12px 20px;font-size:12px;font-weight:550;list-style-position:inside;overflow-wrap:anywhere}.reason-content{padding:0 20px 15px}.reason-row{padding:12px 0;border-top:1px solid var(--border);font-size:12px}.reason-row:first-child{border-top:0}.reason-meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;margin-bottom:5px}.citation{display:inline-flex;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;border:1px solid var(--border);border-radius:4px;padding:0 5px;line-height:1.7;margin:2px 3px 2px 0;background:var(--surface);white-space:nowrap}.judge{display:grid;grid-template-columns:110px minmax(0,1fr);gap:15px;padding:17px 20px;border-top:1px solid var(--border);background:var(--subtle)}.judge-label{font-size:11px;font-weight:600}.judge-note{font-size:11px;color:var(--muted);margin-top:3px}.judge p{font-size:12px;margin:0 0 6px}.topic{margin-bottom:16px}.topic-header{display:flex;justify-content:space-between;gap:14px;padding:18px 20px;border-bottom:1px solid var(--border)}.topic-header p{font-size:11px;color:var(--muted);margin:5px 0 0;max-width:65ch}.topic-index{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}.timeline{padding:6px 20px 12px}.entry{display:grid;grid-template-columns:90px minmax(0,1fr);gap:18px;padding:20px 0 0}.entry-date{font-size:11px;color:var(--muted);padding-top:2px;font-variant-numeric:tabular-nums}.entry-body{position:relative;border-left:1px solid var(--border);padding:0 0 20px 20px;min-width:0}.entry:last-child .entry-body{padding-bottom:4px}.entry-body:before{content:"";position:absolute;left:-4px;top:7px;width:7px;height:7px;border:1px solid var(--border);border-radius:50%;background:var(--surface)}.entry-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.stance{font-size:12px;font-weight:600}.entry-claim{font-size:11px;color:var(--muted);margin:5px 0 10px}.quote{margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--background);font-size:12px;line-height:1.8;overflow-wrap:anywhere}.entry-context{font-size:11px;color:var(--muted);margin:8px 0 5px}.transition{padding:11px 0 0;font-size:11px;color:var(--muted);line-height:1.8}.transition .badge{margin:0 5px 4px 0}.topic-assessment{padding:12px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);background:var(--background)}.topic-assessment strong{color:var(--foreground);font-weight:550}.cases{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.case{padding:17px 18px}.case-top{display:flex;justify-content:space-between;gap:10px;margin-bottom:10px}.case p{font-size:12px}.case .case-claim{color:var(--muted);font-size:11px}.dual-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.key-values{margin:0}.kv{display:flex;justify-content:space-between;gap:18px;padding:10px 0;border-bottom:1px solid var(--border);font-size:12px}.kv:first-child{padding-top:0}.kv:last-child{border-bottom:0}.kv dt{color:var(--muted)}.kv dd{margin:0;font-weight:550;text-align:right;font-variant-numeric:tabular-nums}.footnotes{font-size:11px;color:var(--muted);line-height:1.85}.sources{display:grid;grid-template-columns:1fr 1fr;gap:0 22px;padding:5px 20px}.source{padding:14px 0;border-bottom:1px solid var(--border);scroll-margin-top:24px;min-width:0}.source-title{font-size:12px;font-weight:550;margin:3px 0 5px;overflow-wrap:anywhere}.source-meta{font-size:11px;color:var(--muted);overflow-wrap:anywhere}.source-excerpt{font-size:11px;color:var(--muted);margin:7px 0 0;line-height:1.8}.footer{margin-top:30px;padding-top:15px;border-top:1px solid var(--border);color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:15px;flex-wrap:wrap}.hash{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.empty{padding:22px 20px;color:var(--muted);font-size:12px}.empty strong{display:block;color:var(--foreground);font-weight:550;margin-bottom:5px}.numeric{font-variant-numeric:tabular-nums}@media(max-width:1050px){.layout{grid-template-columns:120px minmax(0,1fr);gap:24px}.shell{padding:20px 24px 45px}.radar-layout{grid-template-columns:1fr}.radar-note{padding:5px 20px 18px}.mini-stat{display:inline-block;border:0;padding:0;margin:0 25px 0 0}.radar-note>p{margin-bottom:12px}.radar-wrap{max-width:620px;margin:auto;width:100%}}@media(max-width:760px){.radar-wrap .label{font-size:18px}.shell{padding:18px 16px 36px}.layout{display:block}.sidebar{position:static;margin-bottom:24px;display:flex;gap:4px;overflow:auto}.sidebar a{flex:0 0 auto;padding:7px 9px;font-size:11px}.sidebar .nav-title,.sidebar .side-note{display:none}.topbar{margin-bottom:16px;padding-bottom:14px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.disclosures{grid-template-columns:1fr}.metric{padding:14px}.metric-value{font-size:26px}h1{font-size:25px}.section{margin-top:24px}.card-content,.card-header{padding-left:16px;padding-right:16px}.radar-note{padding:5px 16px 18px}.cases,.dual-grid,.sources{grid-template-columns:1fr}.topic-header{padding:16px}.timeline{padding:0 16px 12px}.entry{grid-template-columns:63px minmax(0,1fr);gap:10px}.entry-body{padding-left:14px}.entry-top{display:block}.entry-top .badge{margin-top:6px}.quote{font-size:11px;padding:9px 10px}.judge{grid-template-columns:1fr;gap:8px;padding:15px 16px}.judge-label,.judge-note{display:inline}.judge-note{margin-left:8px}.synthetic{display:block}.sources{padding:2px 16px}.source:last-child{border:0}}@media print{body{background:#fff;color:#18181b}.shell{max-width:none;padding:0}.layout{display:block}.sidebar{display:none}.card,.metric,.entry,.case{break-inside:avoid}.section{break-inside:auto}.table-wrap{overflow:visible}a{color:inherit}.topbar{margin-top:0}.footer{font-size:10px}}
+:root{--emerald:#059669;--emerald-bg:#ECFDF5;--emerald-bd:#A7F3D0;--amber:#B45309;--amber-bg:#FFFBEB;--amber-bd:#FDE68A;--rose:#BE123C;--rose-bg:#FFF1F2;--rose-bd:#FECDD3;--sky:#0369A1;--sky-bg:#F0F9FF;--sky-bd:#BAE6FD;--indigo:#4F46E5;--indigo-bg:#EEF2FF;--indigo-bd:#C7D2FE;--violet:#6D28D9;--violet-bg:#F5F3FF;--violet-bd:#DDD6FE;--teal:#0F766E;--teal-bg:#F0FDFA;--teal-bd:#99F6E4}
+@media(prefers-color-scheme:dark){:root{--emerald:#34D399;--emerald-bg:#052E24;--emerald-bd:#065F46;--amber:#FBBF24;--amber-bg:#352004;--amber-bd:#92400E;--rose:#F87171;--rose-bg:#380D17;--rose-bd:#9F1239;--sky:#38BDF8;--sky-bg:#082F49;--sky-bd:#075985;--indigo:#818CF8;--indigo-bg:#1E1B4B;--indigo-bd:#3730A3;--violet:#A78BFA;--violet-bg:#2E1065;--violet-bd:#5B21B6;--teal:#2DD4BF;--teal-bg:#042F2E;--teal-bd:#115E59}}
+*{box-sizing:border-box}h1,h2,h3,.stance,.reason-meta,.metadata,.synthetic,.topic-index,.judge-label,.badge,.top-meta{overflow-wrap:anywhere;min-width:0}.legend-item{max-width:100%;overflow-wrap:anywhere}html{scroll-behavior:auto;scroll-padding-top:24px}body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font);font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:4px}p{margin:0 0 10px;overflow-wrap:anywhere}ul{padding-left:19px;margin:8px 0}li{margin:5px 0;overflow-wrap:anywhere}.shell{max-width:1280px;margin:0 auto;padding:24px 32px 56px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 0 20px;border-bottom:1px solid var(--border);margin-bottom:30px;font-size:12px;color:var(--muted)}.brand{display:flex;gap:10px;align-items:center;font-weight:700;color:var(--foreground);letter-spacing:.055em}.mark{display:grid;place-items:center;width:27px;height:27px;border:0;border-radius:7px;font-size:14px;color:#fff;background:linear-gradient(135deg,#4F46E5,#0D9488);box-shadow:0 2px 6px rgba(79,70,229,.28)}.top-meta{font-size:11px;text-align:right}.layout{display:grid;grid-template-columns:160px minmax(0,1fr);gap:32px}.sidebar{position:sticky;top:24px;align-self:start;font-size:12px}.nav-title{font-size:11px;letter-spacing:.10em;color:var(--muted);margin:0 0 12px;font-weight:650}.sidebar a{display:block;color:var(--muted);padding:8px 11px;margin:2px 0;border-radius:7px;transition:background .15s,color .15s}.sidebar a:hover{background:var(--subtle);color:var(--foreground);text-decoration:none}.sidebar a:first-of-type{color:var(--indigo);background:var(--indigo-bg);font-weight:650}.sidebar .side-note{margin:27px 10px 0;color:var(--muted);font-size:11px;line-height:1.8}.content{min-width:0}.eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--indigo);letter-spacing:.06em;margin-bottom:8px;padding:2px 8px;border-radius:999px;background:var(--indigo-bg);border:1px solid var(--indigo-bd)}h1{font-size:28px;line-height:1.35;letter-spacing:-.035em;margin:0 0 10px;font-weight:700}h2{font-size:18px;letter-spacing:-.02em;line-height:1.4;margin:0;font-weight:680}h3{font-size:14px;margin:0 0 4px;font-weight:650}.subtitle{font-size:13px;color:var(--muted);max-width:78ch}.metadata{display:flex;flex-wrap:wrap;gap:7px 14px;color:var(--muted);font-size:11px;margin:14px 0 23px;align-items:center}.badge{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;line-height:1.5;white-space:normal;color:var(--muted);background:var(--subtle)}.badge.accent{color:var(--indigo);background:var(--indigo-bg);border-color:var(--indigo-bd)}.badge.ok{color:var(--emerald);background:var(--emerald-bg);border-color:var(--emerald-bd)}.badge.negative{color:var(--rose);background:var(--rose-bg);border-color:var(--rose-bd)}.badge.warn{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-bd)}.badge.info{color:var(--sky);background:var(--sky-bg);border-color:var(--sky-bd)}.badge.violet{color:var(--violet);background:var(--violet-bg);border-color:var(--violet-bd)}@media(prefers-color-scheme:dark){.badge.negative{color:#F87171}}.synthetic{display:flex;gap:8px;align-items:baseline;padding:11px 14px;border:1px solid var(--amber-bd);background:var(--amber-bg);border-radius:var(--radius);margin:18px 0;font-size:11.5px;color:var(--amber)}.synthetic strong{color:var(--amber);font-weight:700}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.metric{min-width:0;border:1px solid var(--border);border-top:3px solid var(--indigo);border-radius:var(--radius);background:var(--surface);padding:16px 16px 14px;box-shadow:0 1px 2px rgba(15,23,42,.04)}.metric.metric-emerald{border-top-color:#10B981}.metric.metric-emerald .metric-value{color:var(--emerald)}.metric.metric-indigo{border-top-color:#4F46E5}.metric.metric-indigo .metric-value{color:var(--indigo)}.metric.metric-teal{border-top-color:#14B8A6}.metric.metric-teal .metric-value{color:var(--teal)}.metric.metric-violet{border-top-color:#8B5CF6}.metric.metric-violet .metric-value{color:var(--violet)}.metric-label{color:var(--muted);font-size:11px;font-weight:600}.metric-value{font-size:28px;font-weight:700;letter-spacing:-.04em;line-height:1.2;margin:8px 0;font-variant-numeric:tabular-nums}.metric-note{font-size:11px;color:var(--muted);line-height:1.55}.disclosures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:18px}.section{margin-top:30px;scroll-margin-top:24px}.section-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:13px}.section-description{font-size:11.5px;color:var(--muted);margin-top:4px}.card{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.04)}.card-header{padding:16px 20px 0}.card-header-sub{font-size:11.5px;color:var(--muted);margin-top:3px}.card-content{padding:16px 20px}.card-footer{border-top:1px solid var(--border);padding:12px 20px;font-size:11px;color:var(--muted);background:var(--subtle)}.viz-card{margin-bottom:18px}.viz-wrap{padding:14px 18px 16px}.viz-block{border-bottom:1px solid var(--border);padding:14px 18px 16px}.viz-block:last-child{border-bottom:0}.viz-subhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px}.viz-subhead h4{margin:0;font-size:13px;font-weight:650;color:var(--foreground)}.viz-subhead span{font-size:11px;color:var(--muted)}.viz-svg{display:block;width:100%;height:auto;max-width:740px;margin:0 auto}.viz-svg text{font-family:var(--font)}.viz-group-label{font-size:11px;font-weight:700;letter-spacing:.04em;fill:var(--indigo);text-transform:uppercase}.viz-divider{stroke:var(--border);stroke-width:1}.viz-row-label{font-size:12px;font-weight:600;fill:var(--foreground)}.viz-n-sub{font-size:10.5px;font-weight:500;fill:var(--muted)}.viz-track{fill:var(--subtle)}.viz-bar-pct{font-size:11px;font-weight:700;fill:#FFFFFF}.viz-stat-val{font-size:11.5px;font-weight:650;fill:var(--foreground);font-variant-numeric:tabular-nums}.viz-stat-sub{font-size:10.5px;font-weight:500;fill:var(--muted);font-variant-numeric:tabular-nums}.viz-legend-text{font-size:11px;fill:var(--muted);font-weight:550}.viz-grid{stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}.viz-axis-base{stroke:var(--border);stroke-width:1.4}.viz-axis-tick{font-size:10.5px;fill:var(--muted);font-variant-numeric:tabular-nums}.viz-axis-title{font-size:10.5px;font-weight:650;fill:var(--muted)}.viz-axis-rate{fill:var(--indigo)}.viz-ref-line{stroke:var(--teal);stroke-width:1.6;stroke-dasharray:5 4}.viz-ref-pill rect{fill:var(--teal-bg);stroke:var(--teal-bd);stroke-width:1}.viz-ref-pill text{font-size:10px;font-weight:700;fill:var(--teal)}.viz-ci{stroke:var(--foreground);stroke-width:1.5;opacity:.65}.viz-bar-val{font-size:12px;font-weight:700;fill:var(--foreground);font-variant-numeric:tabular-nums}.viz-bar-sub{font-size:10.5px;fill:var(--muted);font-variant-numeric:tabular-nums}.viz-empty-bar{fill:var(--subtle);stroke:var(--border);stroke-width:1.2;stroke-dasharray:3 2}.viz-empty-track{stroke:var(--border);stroke-width:1.4;stroke-dasharray:4 3}.viz-x-label{font-size:12px;font-weight:650;fill:var(--foreground)}.viz-x-sub{font-size:10.5px;fill:var(--muted);font-variant-numeric:tabular-nums}.viz-trend-line{stroke:var(--indigo);stroke-width:2.2;stroke-dasharray:5 3}.viz-trend-dot{fill:var(--surface);stroke:var(--indigo);stroke-width:2.4}.viz-acc-line{stroke:var(--indigo);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}.viz-acc-dot{fill:var(--indigo);stroke:var(--surface);stroke-width:2}.viz-acc-pill-bg{fill:var(--indigo-bg);stroke:var(--indigo-bd);stroke-width:1}.viz-acc-pill-text{font-size:10.5px;font-weight:700;fill:var(--indigo);font-variant-numeric:tabular-nums}.viz-leg-med{stroke:var(--foreground)}.kpi-chips{display:flex;flex-wrap:wrap;gap:8px;padding:12px 20px 4px}.kpi-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;background:var(--subtle);border:1px solid var(--border);color:var(--foreground);font-variant-numeric:tabular-nums}.kpi-chip.chip-indigo{background:var(--indigo-bg);border-color:var(--indigo-bd);color:var(--indigo)}.kpi-chip.chip-emerald{background:var(--emerald-bg);border-color:var(--emerald-bd);color:var(--emerald)}.kpi-chip.chip-teal{background:var(--teal-bg);border-color:var(--teal-bd);color:var(--teal)}.chart-empty{padding:12px 14px;border:1px dashed var(--border);border-radius:8px;background:var(--subtle);color:var(--muted);font-size:12px;text-align:center}.summary{font-size:13px;line-height:1.9}.summary .summary-label{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--indigo);margin-bottom:9px}.radar-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(210px,1fr);align-items:center}.radar-wrap{padding:10px 0 0;min-width:0}.radar-wrap svg{display:block;width:100%;height:auto}.radar-note{padding:20px 22px 20px 4px;font-size:12px;color:var(--muted)}.legend{display:flex;gap:9px 17px;flex-wrap:wrap;font-size:11px;margin:5px 20px 17px;color:var(--muted)}.legend-item{display:flex;align-items:center;gap:7px}.legend-line{width:18px;border-top:2.5px solid;flex:0 0 auto;border-radius:2px}.legend-line.mean-line{height:3px;border-top:0;background:linear-gradient(90deg,#4F46E5,#7C3AED,#0D9488)}.mini-stat{border-top:1px solid var(--border);padding-top:12px;margin-top:14px}.mini-stat strong{display:block;font-size:20px;color:var(--indigo);font-weight:700;margin:3px 0;font-variant-numeric:tabular-nums}.table-wrap{overflow:auto;max-width:100%}table{border-collapse:collapse;width:100%;font-size:12px;min-width:650px}caption{text-align:left;color:var(--muted);padding:12px 20px 8px;font-size:11.5px;font-weight:550}th,td{border-bottom:1px solid var(--border);padding:11px 12px;text-align:right;vertical-align:top;font-variant-numeric:tabular-nums}th{font-weight:600;color:var(--muted);background:var(--subtle);font-size:11px}th:first-child,td:first-child{text-align:left;min-width:148px;padding-left:20px}th:last-child,td:last-child{padding-right:20px}tbody tr:last-child td{border-bottom:0}.mean-cell{font-weight:700;color:var(--indigo)}.dim-label{display:block;color:var(--foreground);font-weight:600}.n-note{color:var(--muted);font-size:11px;margin-top:2px}details{border-top:1px solid var(--border)}summary{cursor:pointer;padding:12px 20px;font-size:12px;font-weight:600;list-style-position:inside;overflow-wrap:anywhere}summary:hover{background:var(--subtle)}.reason-content{padding:0 20px 15px}.reason-row{padding:12px 0;border-top:1px solid var(--border);font-size:12px}.reason-row:first-child{border-top:0}.reason-meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;margin-bottom:5px}.citation{display:inline-flex;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;border:1px solid var(--indigo-bd);border-radius:5px;padding:0 6px;line-height:1.7;margin:2px 3px 2px 0;background:var(--indigo-bg);color:var(--indigo);white-space:nowrap}.judge{display:grid;grid-template-columns:110px minmax(0,1fr);gap:15px;padding:17px 20px;border-top:1px solid var(--border);background:var(--violet-bg)}.judge-label{font-size:11px;font-weight:700;color:var(--violet)}.judge-note{font-size:11px;color:var(--muted);margin-top:3px}.judge p{font-size:12px;margin:0 0 6px}.topic{margin-bottom:16px}.topic-header{display:flex;justify-content:space-between;gap:14px;padding:18px 20px;border-bottom:1px solid var(--border)}.topic-header p{font-size:11.5px;color:var(--muted);margin:5px 0 0;max-width:65ch}.topic-index{font-size:11px;color:var(--indigo);font-weight:600;font-variant-numeric:tabular-nums}.timeline{padding:6px 20px 12px}.entry{display:grid;grid-template-columns:90px minmax(0,1fr);gap:18px;padding:20px 0 0}.entry-date{font-size:11px;color:var(--muted);padding-top:2px;font-variant-numeric:tabular-nums}.entry-body{position:relative;border-left:2px solid var(--border);padding:0 0 20px 20px;min-width:0}.entry:last-child .entry-body{padding-bottom:4px}.entry-body:before{content:"";position:absolute;left:-6px;top:6px;width:10px;height:10px;border:2px solid var(--surface);border-radius:50%;background:var(--muted)}.entry-body.dot-ok:before{background:#10B981}.entry-body.dot-negative:before{background:#F43F5E}.entry-body.dot-warn:before{background:#F59E0B}.entry-body.dot-info:before{background:#0EA5E9}.entry-body.dot-violet:before{background:#8B5CF6}.entry-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.stance{font-size:12.5px;font-weight:650}.entry-claim{font-size:11.5px;color:var(--muted);margin:5px 0 10px}.quote{margin:0;padding:10px 12px;border:1px solid var(--border);border-left:3px solid var(--indigo);border-radius:6px;background:var(--subtle);font-size:12px;line-height:1.8;overflow-wrap:anywhere}.entry-context{font-size:11px;color:var(--muted);margin:8px 0 5px}.transition{padding:11px 0 0;font-size:11px;color:var(--muted);line-height:1.8}.transition .badge{margin:0 5px 4px 0}.topic-assessment{padding:12px 20px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted);background:var(--subtle)}.topic-assessment strong{color:var(--foreground);font-weight:600}.cases{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.case{padding:17px 18px;border-left:3px solid var(--border)}.case.case-ok{border-left-color:#10B981}.case.case-negative{border-left-color:#F43F5E}.case.case-warn{border-left-color:#F59E0B}.case.case-info{border-left-color:#0EA5E9}.case.case-violet{border-left-color:#8B5CF6}.case-top{display:flex;justify-content:space-between;gap:10px;margin-bottom:10px}.case p{font-size:12px}.case .case-claim{color:var(--muted);font-size:11.5px}.dual-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.key-values{margin:0}.kv{display:flex;justify-content:space-between;gap:18px;padding:10px 0;border-bottom:1px solid var(--border);font-size:12px}.kv:first-child{padding-top:0}.kv:last-child{border-bottom:0}.kv dt{color:var(--muted)}.kv dd{margin:0;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}.footnotes{font-size:11px;color:var(--muted);line-height:1.85}.sources{display:grid;grid-template-columns:1fr 1fr;gap:0 22px;padding:5px 20px}.source{padding:14px 0;border-bottom:1px solid var(--border);scroll-margin-top:24px;min-width:0}.source-title{font-size:12px;font-weight:600;margin:3px 0 5px;overflow-wrap:anywhere}.source-meta{font-size:11px;color:var(--muted);overflow-wrap:anywhere}.source-excerpt{font-size:11px;color:var(--muted);margin:7px 0 0;line-height:1.8}.footer{margin-top:30px;padding-top:15px;border-top:1px solid var(--border);color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:15px;flex-wrap:wrap}.hash{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.empty{padding:22px 20px;color:var(--muted);font-size:12px}.empty strong{display:block;color:var(--foreground);font-weight:600;margin-bottom:5px}.numeric{font-variant-numeric:tabular-nums}@media(max-width:1050px){.layout{grid-template-columns:124px minmax(0,1fr);gap:24px}.shell{padding:20px 24px 45px}.radar-layout{grid-template-columns:1fr}.radar-note{padding:5px 20px 18px}.mini-stat{display:inline-block;border:0;padding:0;margin:0 25px 0 0}.radar-note>p{margin-bottom:12px}.radar-wrap{max-width:660px;margin:auto;width:100%}}@media(max-width:760px){.radar-wrap .label{font-size:16px}.shell{padding:18px 16px 36px}.layout{display:block}.sidebar{position:static;margin-bottom:24px;display:flex;gap:4px;overflow:auto}.sidebar a{flex:0 0 auto;padding:7px 9px;font-size:11px}.sidebar .nav-title,.sidebar .side-note{display:none}.topbar{margin-bottom:16px;padding-bottom:14px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.disclosures{grid-template-columns:1fr}.metric{padding:14px}.metric-value{font-size:25px}h1{font-size:25px}.section{margin-top:24px}.card-content,.card-header,.viz-wrap,.viz-block{padding-left:14px;padding-right:14px}.kpi-chips{padding-left:14px;padding-right:14px}.radar-note{padding:5px 16px 18px}.cases,.dual-grid,.sources{grid-template-columns:1fr}.topic-header{padding:16px}.timeline{padding:0 16px 12px}.entry{grid-template-columns:63px minmax(0,1fr);gap:10px}.entry-body{padding-left:14px}.entry-top{display:block}.entry-top .badge{margin-top:6px}.quote{font-size:11px;padding:9px 10px}.judge{grid-template-columns:1fr;gap:8px;padding:15px 16px}.judge-label,.judge-note{display:inline}.judge-note{margin-left:8px}.synthetic{display:block}.sources{padding:2px 16px}.source:last-child{border:0}}@media print{body{background:#fff;color:#0f172a}.shell{max-width:none;padding:0}.layout{display:block}.sidebar{display:none}.card,.metric,.entry,.case{break-inside:avoid;box-shadow:none}.section{break-inside:auto}.table-wrap{overflow:visible}a{color:inherit}.topbar{margin-top:0}.footer{font-size:10px}}
 '''
 
 
@@ -619,16 +1440,21 @@ def objective_metrics(data, lang="zh"):
     if m is None:
         return f'<div class="card empty"><strong>{esc(t["no_fact_check_title"])}</strong>{esc(t["no_fact_check_body"])}</div>'
     cards = []
-    for label, key, note in ((t["strict_support"], "strict_support_rate", t["strict_support_note"]),
-                             (t["accountability"], "accountability", t["accountability_note"]),
-                             (t["adjudication_cov"], "adjudication_coverage", t["adjudication_cov_note"])):
+    for label, key, note, tone_cls in (
+        (t["strict_support"], "strict_support_rate", t["strict_support_note"], "metric-emerald"),
+        (t["accountability"], "accountability", t["accountability_note"], "metric-indigo"),
+        (t["adjudication_cov"], "adjudication_coverage", t["adjudication_cov_note"], "metric-teal"),
+    ):
         r = m.get(key)
         detail = f'{r["numerator"]} / {r["denominator"]}{_ci_text(r)} · {note}' if r else t["not_provided"]
-        cards.append((label, percent(r), detail))
+        cards.append((label, percent(r), detail, tone_cls))
     b = m.get("brier")
     b_note = f'n = {b["n"]}{" (BSS=" + fmt(b.get("brier_skill_score"), 3) + ")" if b.get("brier_skill_score") is not None else ""} · {t["brier_note"]}' if b else t["not_provided"]
-    cards.append((t["brier_label"], fmt(b.get("value"), 3) if b else "—", b_note))
-    html_out = '<div class="metrics">' + "".join(f'<div class="metric"><div class="metric-label">{esc(label)}</div><div class="metric-value">{esc(value)}</div><div class="metric-note">{esc(note)}</div></div>' for label, value, note in cards) + '</div>'
+    cards.append((t["brier_label"], fmt(b.get("value"), 3) if b else "—", b_note, "metric-violet"))
+    html_out = '<div class="metrics">' + "".join(
+        f'<div class="metric {tone_cls}"><div class="metric-label">{esc(label)}</div><div class="metric-value">{esc(value)}</div><div class="metric-note">{esc(note)}</div></div>'
+        for label, value, note, tone_cls in cards
+    ) + '</div>'
 
     # Mandatory methodology disclosures: prediction vs factual split, S/C/M, lifecycle, evidence quality, domains.
     disclosures = []
@@ -643,7 +1469,7 @@ def objective_metrics(data, lang="zh"):
                 type_rows.append(f'<div class="kv"><dt>{esc(label)}</dt><dd>{esc(percent(sr))} ({sr["numerator"]}/{sr["denominator"]})</dd></div>')
         fam = m.get("family_metrics") or {}
         if fam.get("family_weighted_strict_support_rate") is not None:
-            type_rows.append(f'<div class="kv"><dt>Family-weighted</dt><dd>{fam["family_weighted_strict_support_rate"]*100:.1f}% ({fam["family_count"]} families)</dd></div>')
+            type_rows.append(f'<div class="kv"><dt>{esc(t["family_weighted"])}</dt><dd>{fam["family_weighted_strict_support_rate"]*100:.1f}% ({fam["family_count"]} {esc(t["families_unit"])})</dd></div>')
         if type_rows:
             disclosures.append(f'<div class="card"><div class="card-header"><h3>{esc(t["pred_vs_fact"])}</h3></div><div class="card-content"><dl class="key-values">{"".join(type_rows)}</dl></div></div>')
     cc = m.get("categorical_counts") or {}
@@ -652,17 +1478,31 @@ def objective_metrics(data, lang="zh"):
     scm_rows = []
     if cc:
         bin_acc = m.get("binary_accuracy_excluding_mixed")
-        scm_rows.append(f'<div class="kv"><dt>S / C / M (N={m.get("categorical_n", 0)})</dt><dd>{cc.get("supported", 0)} / {cc.get("contradicted", 0)} / {cc.get("mixed", 0)}</dd></div>')
+        scm_rows.append(f'<div class="kv"><dt>{esc(t["scm_label"].format(n=m.get("categorical_n", 0)))}</dt><dd><span style="color:var(--emerald)">{cc.get("supported", 0)}</span> / <span style="color:var(--rose)">{cc.get("contradicted", 0)}</span> / <span style="color:var(--amber)">{cc.get("mixed", 0)}</span></dd></div>')
         if bin_acc:
-            scm_rows.append(f'<div class="kv"><dt>Binary S/(S+C)</dt><dd>{esc(percent(bin_acc))} ({bin_acc["numerator"]}/{bin_acc["denominator"]})</dd></div>')
+            scm_rows.append(f'<div class="kv"><dt>{esc(t["binary_acc_label"])}</dt><dd>{esc(percent(bin_acc))} ({bin_acc["numerator"]}/{bin_acc["denominator"]})</dd></div>')
     if eq:
-        scm_rows.append(f'<div class="kv"><dt>Evidence quality</dt><dd>{fmt(eq.get("mean"), 3)} (n={eq.get("assessed_n", 0)}/{eq.get("expected_n", 0)})</dd></div>')
+        scm_rows.append(f'<div class="kv"><dt>{esc(t["evidence_quality_label"])}</dt><dd>{fmt(eq.get("mean"), 3)} (n={eq.get("assessed_n", 0)}/{eq.get("expected_n", 0)})</dd></div>')
     if lc:
-        scm_rows.append(f'<div class="kv"><dt>{esc(t["lifecycle_dist"])}</dt><dd>pending={lc.get("pending",0)} · awaiting={lc.get("awaiting_evidence",0)} · disputed={lc.get("disputed",0)} · indet={m.get("indeterminate_resolved_n",0)}</dd></div>')
+        lc_txt = t["lifecycle_fmt"].format(
+            pending=lc.get("pending", 0), awaiting=lc.get("awaiting_evidence", 0),
+            disputed=lc.get("disputed", 0), indet=m.get("indeterminate_resolved_n", 0),
+        )
+        scm_rows.append(f'<div class="kv"><dt>{esc(t["lifecycle_dist"])}</dt><dd>{esc(lc_txt)}</dd></div>')
     if scm_rows:
         disclosures.append(f'<div class="card"><div class="card-header"><h3>{esc(t["scm_detail"])}</h3></div><div class="card-content"><dl class="key-values">{"".join(scm_rows)}</dl></div></div>')
     if disclosures:
         html_out += '<div class="disclosures">' + "".join(disclosures) + '</div>'
+
+    # Stacked Verdict Breakdown Bar Chart (claim types + difficulty tiers)
+    verdict_svg = render_verdict_breakdown_svg(m, lang=lang)
+    if verdict_svg:
+        html_out += (
+            f'<div class="card viz-card"><div class="card-header"><h3>{esc(t["verdict_chart_title"])}</h3>'
+            f'<div class="card-header-sub">{esc(t["verdict_chart_desc"])}</div></div>'
+            f'<div class="viz-wrap">{verdict_svg}</div></div>'
+        )
+
     by_domain = m.get("by_domain") or {}
     if len(by_domain) > 1:
         d_rows = "".join(
@@ -691,9 +1531,13 @@ def objective_metrics(data, lang="zh"):
                 f'<td>{esc(percent(sr))}</td><td>{sr.get("numerator", 0)}/{sr.get("denominator", 0)}</td>'
                 f'<td>{esc(mean_s)}</td></tr>'
             )
+        diff_svg = render_difficulty_accuracy_svg(m, lang=lang)
         if diff_rows:
+            chart_part = f'<div class="viz-block">{diff_svg}</div>' if diff_svg else ""
             html_out += (
-                f'<div class="card" style="margin-bottom:20px"><div class="table-wrap"><table>'
+                f'<div class="card viz-card"><div class="card-header"><h3>{esc(t["diff_chart_title"])}</h3>'
+                f'<div class="card-header-sub">{esc(t["diff_chart_desc"])}</div></div>'
+                f'{chart_part}<div class="table-wrap"><table>'
                 f'<caption>{esc(t["difficulty_title"])} · {esc(nt_caption)}</caption>'
                 f'<thead><tr><th>{esc(t["th_tier"])}</th><th>{esc(t["th_claims"])}</th>'
                 f'<th>{esc(t["strict_support"])}</th><th>S/N</th><th>{esc(t["th_mean_score"])}</th></tr></thead>'
@@ -707,8 +1551,13 @@ def objective_metrics(data, lang="zh"):
             f'{t["horizon_mean_lead"]}: {fmt(phor.get("mean_lead_time_days"), 1)}d',
             f'{t["horizon_median_lead"]}: {fmt(phor.get("median_lead_time_days"), 1)}d',
         ]
+        chips = [
+            f'<span class="kpi-chip chip-indigo">{esc(t["horizon_mean_lead"])}: {fmt(phor.get("mean_lead_time_days"), 1)}d</span>',
+            f'<span class="kpi-chip chip-teal">{esc(t["horizon_median_lead"])}: {fmt(phor.get("median_lead_time_days"), 1)}d</span>',
+        ]
         if phor.get("supported_mean_lead_time_days") is not None:
             lead_parts.append(f'{t["horizon_supported_lead"]}: {fmt(phor.get("supported_mean_lead_time_days"), 1)}d')
+            chips.append(f'<span class="kpi-chip chip-emerald">{esc(t["horizon_supported_lead"])}: {fmt(phor.get("supported_mean_lead_time_days"), 1)}d</span>')
         h_rows = []
         for bkey in ("le_30d", "31_90d", "91_180d", "181_365d", "gt_365d"):
             bdata = hbuckets.get(bkey)
@@ -722,9 +1571,21 @@ def objective_metrics(data, lang="zh"):
                 f'<td>{esc(percent(sr))}</td><td>{sr.get("numerator", 0)}/{sr.get("denominator", 0)}</td>'
                 f'<td>{esc(avg_d)}</td></tr>'
             )
+        hist_svg = render_horizon_histogram_svg(phor, lang=lang)
+        box_html = render_horizon_boxplot_html(data, lang=lang)
         if h_rows:
+            hist_block = (
+                f'<div class="viz-block"><div class="viz-subhead"><h4>{esc(t["horizon_hist_title"])}</h4>'
+                f'<span>{esc(t["horizon_hist_desc"])}</span></div>{hist_svg}</div>'
+            ) if hist_svg else ""
+            box_block = (
+                f'<div class="viz-block"><div class="viz-subhead"><h4>{esc(t["boxplot_title"])}</h4>'
+                f'<span>{esc(t["boxplot_desc"])}</span></div>{box_html}</div>'
+            ) if box_html else ""
             html_out += (
-                f'<div class="card" style="margin-bottom:20px"><div class="table-wrap"><table>'
+                f'<div class="card viz-card"><div class="card-header"><h3>{esc(t["horizon_title"])}</h3></div>'
+                f'<div class="kpi-chips">{"".join(chips)}</div>'
+                f'{hist_block}{box_block}<div class="table-wrap"><table>'
                 f'<caption>{esc(t["horizon_title"])} · {esc(" · ".join(lead_parts))}</caption>'
                 f'<thead><tr><th>{esc(t["th_horizon"])}</th><th>{esc(t["th_claims"])}</th>'
                 f'<th>{esc(t["strict_support"])}</th><th>S/N</th><th>{esc(t["th_avg_lead"])}</th></tr></thead>'
@@ -793,7 +1654,7 @@ def render_topics(data, lang="zh"):
                 kind = transition["kind"]
                 label = transition.get("label") or t["relations"][kind]
                 explanation = f'<div class="transition">{badge(label, RELATION_TONES[kind])}{esc(transition.get("explanation", ""))}</div>'
-            entries.append(f'<div class="entry"><div class="entry-date">{esc(entry["date"])}</div><div class="entry-body"><div class="entry-top"><span class="stance">{esc(entry["stance"])}</span>{badge(status,tone)}</div><p class="entry-claim">{esc(entry["claim"])}</p><blockquote class="quote">“{esc(entry["quote"])}”</blockquote><p class="entry-context">{esc(entry.get("context", ""))}</p>{citation_links(data,entry.get("source_ids",[]))}{citation_links(data,entry.get("evidence_ids",[]))}{explanation}</div></div>')
+            entries.append(f'<div class="entry"><div class="entry-date">{esc(entry["date"])}</div><div class="entry-body dot-{tone}"><div class="entry-top"><span class="stance">{esc(entry["stance"])}</span>{badge(status,tone)}</div><p class="entry-claim">{esc(entry["claim"])}</p><blockquote class="quote">“{esc(entry["quote"])}”</blockquote><p class="entry-context">{esc(entry.get("context", ""))}</p>{citation_links(data,entry.get("source_ids",[]))}{citation_links(data,entry.get("evidence_ids",[]))}{explanation}</div></div>')
         parts.append(f'<article class="card topic" id="topic-{index}"><header class="topic-header"><div><h3>{esc(topic["label"])}</h3><p>{esc(topic.get("summary",""))}</p></div><span class="topic-index">{index:02d} / {esc(t["topic_nodes"].format(n=len(topic.get("entries") or [])))}</span></header><div class="timeline">{"".join(entries)}</div><div class="topic-assessment"><strong>{esc(t["topic_interp"])}</strong>{esc(topic.get("assessment") or t["topic_unexplained"])}</div></article>')
     return "".join(parts) or f'<div class="card empty">{esc(t["topics_empty"])}</div>'
 
@@ -815,6 +1676,7 @@ def render_report(data, view="full", theme=None, rubric=None, lang="zh", expand_
     overview = f'<section id="overview"><div class="eyebrow">{"LONGITUDINAL REVIEW" if view=="longitudinal" else "CLAIM & CREDIBILITY AUDIT"}</div><h1>{esc(r["title"] if view=="full" else r.get("longitudinal_title") or r["title"])}</h1><p class="subtitle">{esc(r.get("subtitle", ""))}</p><div class="metadata"><span>{esc(r["subject"])}</span><span>{esc(r["period_start"])} — {esc(r["period_end"])}</span><span>{esc(t["as_of_prefix"])} {esc(r["as_of"])}</span>{comp_badge}</div>{synthetic}{objective_metrics(data, lang=lang) if view=="full" else ""}<div class="card"><div class="card-content summary"><span class="summary-label">{esc(t["summary_label"])}</span>{"".join(f"<p>{esc(line)}</p>" for line in r.get("summary") or [])}</div><div class="card-footer">{esc(r.get("scope_note") or t["default_scope_note"])}</div></div></section>'
     topics = f'<section id="longitudinal" class="section"><div class="section-heading"><div><h2>{esc(t["topics_title"])}</h2><p class="section-description">{esc(t["topics_desc"])}</p></div>{badge(t["topics_count"].format(n=len(data.get("topics") or [])))}</div>{render_topics(data, lang=lang)}</section>'
     model = f'<section id="model-panel" class="section"><div class="section-heading"><div><h2>{esc(t["panel_title"])}</h2><p class="section-description">{esc(t["panel_desc"])}</p></div>{badge(t["panel_badge"].format(n=len(prepared["rubric"]["dimensions"])))}</div>{render_panel(data,prepared,theme,lang=lang,expand_details=expand_details)}</section>'
+    diff_badge_tones = {"trivial": "ok", "moderate": "info", "hard": "warn", "non_consensus": "violet"}
     cases = []
     for case in data.get("cases") or []:
         st_key = case.get("status", "not_checked")
@@ -825,9 +1687,9 @@ def render_report(data, view="full", theme=None, rubric=None, lang="zh", expand_
             d_label = t["difficulty_tiers"].get(case["difficulty"], case["difficulty"])
             if case.get("difficulty_score") is not None:
                 d_label = f"{d_label} ({case['difficulty_score']}/5)"
-            badges.append(badge(d_label, "accent" if case["difficulty"] in {"hard", "non_consensus"} else "muted"))
+            badges.append(badge(d_label, diff_badge_tones.get(case["difficulty"], "muted")))
         if case.get("lead_time_days") is not None:
-            badges.append(badge(f'{case["lead_time_days"]:g}d', "muted"))
+            badges.append(badge(f'{case["lead_time_days"]:g}d', "accent"))
         meta_bits = []
         if case.get("speaker"):
             meta_bits.append(str(case["speaker"]))
@@ -836,7 +1698,7 @@ def render_report(data, view="full", theme=None, rubric=None, lang="zh", expand_
         if case.get("notes"):
             meta_bits.append(str(case["notes"]))
         diff_rat_html = f'<p class="source-meta">{esc(case["difficulty_rationale"])}</p>' if isinstance(case.get("difficulty_rationale"), str) and case["difficulty_rationale"].strip() else ""
-        cases.append(f'<article class="card case"><div class="case-top"><h3>{esc(case["title"])}</h3><div>{" ".join(badges)}</div></div><p class="case-claim">{esc(case["claim"])}</p>{quote_html}<p>{esc(case["assessment"])}</p>{diff_rat_html}{citation_links(data,case.get("evidence_ids") or [])}<p class="source-meta">{esc(" · ".join(meta_bits))}</p></article>')
+        cases.append(f'<article class="card case case-{tone}"><div class="case-top"><h3>{esc(case["title"])}</h3><div>{" ".join(badges)}</div></div><p class="case-claim">{esc(case["claim"])}</p>{quote_html}<p>{esc(case["assessment"])}</p>{diff_rat_html}{citation_links(data,case.get("evidence_ids") or [])}<p class="source-meta">{esc(" · ".join(meta_bits))}</p></article>')
     case_section = f'<section id="cases" class="section"><div class="section-heading"><div><h2>{esc(t["cases_title"])}</h2><p class="section-description">{esc(t["cases_desc"])}</p></div></div><div class="cases">'+''.join(cases)+'</div></section>' if cases and view == "full" else ''
     c = data.get("coverage") or {}
     cost = data.get("costs") or {}
@@ -850,7 +1712,7 @@ def render_report(data, view="full", theme=None, rubric=None, lang="zh", expand_
     cost_body = ''.join(f'<div class="kv"><dt>{esc(label)}</dt><dd>{"USD "+fmt(value) if value is not None else esc(t["unknown_cost"])}</dd></div>' for label, value in cost_rows)
     notes = (c.get("notes") or []) + (cost.get("notes") or []) + (data.get("limitations") or [])
     if comp.get("blockers"):
-        notes = [f"Composite blockers: {', '.join(comp['blockers'])}"] + notes
+        notes = [f"{t['composite_blockers_prefix']}{', '.join(comp['blockers'])}"] + notes
     coverage = f'<section id="coverage" class="section"><div class="section-heading"><h2>{esc(t["coverage_title"])}</h2></div><div class="dual-grid"><div class="card"><div class="card-header"><h3>{esc(t["coverage_card"])}</h3></div><div class="card-content"><dl class="key-values">{coverage_body}</dl></div></div><div class="card"><div class="card-header"><h3>{esc(t["cost_card"])}</h3></div><div class="card-content"><dl class="key-values">{cost_body}</dl></div></div></div><div class="footnotes"><ul>{"".join(f"<li>{esc(note)}</li>" for note in notes)}</ul></div></section>'
     sources = []
     for i, source in enumerate(data.get("sources") or [], 1):

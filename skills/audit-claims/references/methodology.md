@@ -27,7 +27,9 @@
 
 每条观点保留：原话、语言、说话者、发表时间、源链接、本地材料、段落/行号或时间戳、前后语境、否定和条件。机器转录中涉及人名、数量、日期、否定词的疑点先回听或标记不确定；不得把转录错误判给说话者。
 
-多人节目逐句归属。主持人转述嘉宾、引用对手或读新闻，并不自动等于赞同。用 `endorsement = endorsed | quoted | rejected | unclear`；用 `attribution_confidence = high | medium | low`。归属不明的观点仍保存，但不计入个人分数。
+多人节目逐句归属。主持人转述嘉宾、引用对手或读新闻，并不自动等于赞同。用 `endorsement = endorsed | quoted | rejected | mocked | unclear`；用 `attribution_confidence = high | medium | low`。归属不明的观点仍保存，但不计入个人分数。
+
+讽刺与嘲讽不是赞同：说话者若以反讽、挖苦或戏仿方式复述传闻（如拿“据消息人士透露”“知情人士称”取笑），应标为 `endorsement = mocked`（或 `rejected`）。这类条目被排除在个人分数之外，既不进入事实诚信分，也不计入误报率、传闻扣分或翻车率。
 
 ### 主类型与独立标签
 
@@ -61,6 +63,12 @@
 - `uncited_vague`：含糊断言，无引用也没有可核验锚点（如“内部消息”“很多人说”）。
 
 `score_claims.py` 在 `metrics.json` 的 `sourcing_rigor`（整体及每个分组）输出计数与比率：`citation_rate=(primary+secondary)/tagged`、`primary_citation_rate=primary/tagged`、`unsubstantiated_rate=(uncited_specific+uncited_vague)/tagged`（“张口就来率”）、`checkable_rate=verifiable|conditional 占 endorsed 实证断言的比例`。未标注计入 `untagged`，旧版账本缺省不报错，比率显示为不可计算。出处标签描述言论的引用方式，不改变核验裁定，也不作为事实真伪的证据。
+
+**来源层级与来源可信度**：`cited_source_tier` 记录说话者所引来源的层级，权重为 `authoritative_primary=1.0`、`reputable_media=0.75`、`low_credibility_or_rumor=0.25`、`unnamed_insider=0.1`、`none=0.0`。`metrics.json` 的 `source_quality_score.value = 100 × mean(权重)`，只统计 endorsed 实证断言中已标注的条目；未标注不记为 0，`none` 才记为 0。它描述引用的质量，不是事实真伪的裁定。
+
+**翻车率**：`backfire_rate = contradicted / categorical`，分母为可裁定的 supported、contradicted、mixed 总数；`prediction_backfire_rate` 只统计预测。红绿灯：<10% 绿，10%–25% 黄，>25% 红。mocked 与 rejected 条目不进入分母。
+
+**YouTube 频道互动健康度**：`score_claims.py --info-json-dir DIR` 读取 yt-dlp `--write-info-json` 生成的 `*.info.json`，写入 `channel_stats`（`platform=youtube`）。它汇总订阅者（`channel_follower_count`）、逐片中位与平均播放（`view_count`）、点赞与评论，并给出：订阅—播放比（中位播放 ÷ 订阅，基准 10%–20%）、点赞/播放（合并计算，基准 1.5%–3%）、评论/播放（基准 0.2%–0.5%）、互动率 `(点赞+评论)/播放`（基准 1.4%–3.5%）。异常标记：`ghost_subscribers`（订阅—播放比 <1%）、`bot_view_inflation`（点赞/播放 <0.3%）、`engagement_spike`（点赞/播放 >20%），无触发为 `normal`。这些是启发式基准，不是真实性裁决；目录应只包含被审计频道的视频。
 
 ### 重要区别
 

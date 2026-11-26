@@ -488,5 +488,130 @@ class CredibilityAndDifficultyTests(unittest.TestCase):
         self.assertEqual(raters, {'model_a': 2, 'unrecorded': 1})
 
 
+class BackfireSourceAndChannelTests(unittest.TestCase):
+    def test_backfire_rate_is_contradicted_over_categorical_with_traffic_light_tiers(self):
+        rows = [claim('s1', claim_type='factual', outcome='supported'),
+                claim('s2', claim_type='factual', outcome='supported'),
+                claim('m1', claim_type='factual', outcome='mixed'),
+                claim('c1', claim_type='factual', outcome='contradicted')]
+        rate = scoring.core_metrics(rows)['backfire_rate']
+        self.assertEqual((rate['numerator'], rate['denominator']), (1, 4))
+        self.assertAlmostEqual(rate['value'], 0.25)
+        self.assertEqual(rate['traffic_light'], 'yellow')
+        self.assertEqual(scoring.backfire_light(0.0999), 'green')
+        self.assertEqual(scoring.backfire_light(0.10), 'yellow')
+        self.assertEqual(scoring.backfire_light(0.25), 'yellow')
+        self.assertEqual(scoring.backfire_light(0.2501), 'red')
+        self.assertIsNone(scoring.backfire_light(None))
+
+    def test_prediction_backfire_rate_is_split_from_factual_backfire(self):
+        rows = [claim('p1', claim_type='prediction', outcome='contradicted'),
+                claim('p2', claim_type='prediction', outcome='supported'),
+                claim('p3', claim_type='prediction', outcome='supported'),
+                claim('p4', claim_type='prediction', outcome='supported'),
+                claim('f1', claim_type='factual', outcome='contradicted'),
+                claim('f2', claim_type='factual', outcome='supported')]
+        result = scoring.calculate(rows, copy.deepcopy(COVERAGE))
+        self.assertAlmostEqual(result['prediction_backfire_rate']['value'], 0.25)
+        self.assertEqual(result['prediction_backfire_rate']['denominator'], 4)
+        self.assertAlmostEqual(result['backfire_rate']['value'], 2 / 6)
+        self.assertEqual(result['backfire_rate']['traffic_light'], 'red')
+
+    def test_mocked_rumor_is_excluded_from_speaker_misinformation_and_backfire(self):
+        mocked = claim('rumor', claim_type='factual', outcome='contradicted', citation_status='uncited_vague',
+                       endorsement='mocked', cited_source_tier='unnamed_insider')
+        rejected = claim('rej', claim_type='factual', outcome='contradicted', citation_status='uncited_vague',
+                         endorsement='rejected')
+        scoring.validate_claim(mocked)
+        result = scoring.calculate([mocked, rejected, claim('ok', claim_type='factual', outcome='supported')],
+                                   copy.deepcopy(COVERAGE))
+        self.assertEqual(result['factual_credibility']['misinformation_rate']['numerator'], 0)
+        self.assertEqual(result['factual_credibility']['counts']['contradicted_uncited'], 0)
+        self.assertEqual(result['backfire_rate']['numerator'], 0)
+        self.assertEqual(result['selection_funnel']['endorsed_empirical'], 1)
+        with self.assertRaises(ValueError):
+            scoring.validate_claim(claim('bad_endorsement', endorsement='sarcastic'))
+
+    def test_source_quality_score_uses_tier_weights_and_excludes_untagged_and_mocked(self):
+        tiers = ['authoritative_primary', 'reputable_media', 'low_credibility_or_rumor', 'unnamed_insider', 'none']
+        rows = [claim(f'c{i}', cited_source_tier=tier) for i, tier in enumerate(tiers)]
+        rows.append(claim('untagged'))
+        rows.append(claim('mocked_rumor', endorsement='mocked', cited_source_tier='unnamed_insider'))
+        sq = scoring.core_metrics(rows)['source_quality_score']
+        self.assertAlmostEqual(sq['value'], 42.0)
+        self.assertEqual((sq['tagged_n'], sq['untagged_n'], sq['population_n']), (5, 1, 6))
+        self.assertEqual(sq['tier_counts']['none'], 1)
+        self.assertEqual(sq['traffic_light'], 'red')
+        legacy = scoring.core_metrics([claim('a'), vague('b')])['source_quality_score']
+        self.assertIsNone(legacy['value'])
+        self.assertEqual(legacy['tagged_n'], 0)
+        with self.assertRaises(ValueError):
+            scoring.validate_claim(claim('bad_tier', cited_source_tier='tabloid'))
+
+    def test_channel_stats_aggregates_yt_dlp_fields_and_flags_ghost_subscribers(self):
+        records = [{'channel_id': 'UC1', 'channel_follower_count': 1_000_000, 'view_count': v,
+                    'like_count': v // 50, 'comment_count': v // 500} for v in (4000, 6000, 5000)]
+        stats = scoring.channel_stats(records)
+        self.assertEqual(stats['platform'], 'youtube')
+        self.assertEqual(stats['video_n'], 3)
+        self.assertEqual(stats['subscribers'], 1_000_000)
+        self.assertEqual(stats['median_views'], 5000)
+        self.assertAlmostEqual(stats['avg_views'], 5000.0)
+        self.assertAlmostEqual(stats['avg_likes'], 100.0)
+        self.assertAlmostEqual(stats['views_to_subscribers_ratio']['value'], 0.005)
+        self.assertEqual(stats['views_to_subscribers_ratio']['status'], 'below')
+        self.assertAlmostEqual(stats['like_to_view_ratio']['value'], 0.02)
+        self.assertEqual(stats['like_to_view_ratio']['status'], 'within')
+        self.assertAlmostEqual(stats['comment_to_view_ratio']['value'], 0.002)
+        self.assertAlmostEqual(stats['engagement_rate']['value'], 0.022)
+        self.assertEqual(stats['anomaly_flags'], ['ghost_subscribers'])
+
+    def test_channel_stats_flags_bot_view_inflation_engagement_spike_and_normal(self):
+        bots = [{'channel_id': 'UC2', 'channel_follower_count': 50_000, 'view_count': 100_000,
+                 'like_count': 10, 'comment_count': 2}]
+        self.assertEqual(scoring.channel_stats(bots)['anomaly_flags'], ['bot_view_inflation'])
+        spike = [{'channel_id': 'UC3', 'channel_follower_count': 5_000, 'view_count': 1_000,
+                  'like_count': 300, 'comment_count': 5}]
+        self.assertEqual(scoring.channel_stats(spike)['anomaly_flags'], ['engagement_spike'])
+        healthy = [{'channel_id': 'UC4', 'channel_follower_count': 10_000, 'view_count': 1_500,
+                    'like_count': 30, 'comment_count': 3}]
+        healthy_stats = scoring.channel_stats(healthy)
+        self.assertEqual(healthy_stats['anomaly_flags'], ['normal'])
+        self.assertEqual(healthy_stats['views_to_subscribers_ratio']['status'], 'within')
+        self.assertEqual(scoring.channel_stats([{'channel_id': 'UC5'}])['anomaly_flags'], ['insufficient_data'])
+
+    def test_channel_stats_pools_only_videos_with_the_needed_fields_and_rejects_mixed_channels(self):
+        records = [{'channel_id': 'UC6', 'channel_follower_count': 2_000, 'view_count': 1_000, 'like_count': 40, 'comment_count': None},
+                   {'channel_id': 'UC6', 'channel_follower_count': 2_000, 'view_count': 3_000, 'like_count': None, 'comment_count': 9}]
+        stats = scoring.channel_stats(records)
+        self.assertEqual(stats['avg_views'], 2000.0)
+        self.assertAlmostEqual(stats['avg_comments'], 9.0)
+        self.assertAlmostEqual(stats['like_to_view_ratio']['value'], 0.04)
+        self.assertAlmostEqual(stats['comment_to_view_ratio']['value'], 0.003)
+        self.assertIsNone(stats['engagement_rate']['value'])
+        with self.assertRaises(ValueError):
+            scoring.channel_stats([{'channel_id': 'UCa'}, {'channel_id': 'UCb'}])
+        with self.assertRaises(ValueError):
+            scoring.channel_stats(records, platform='myspace')
+
+    def test_channel_records_flow_into_metrics_only_when_provided(self):
+        records = [{'channel_id': 'UC7', 'channel_follower_count': 10_000, 'view_count': 1_500, 'like_count': 30}]
+        with_info = scoring.calculate([claim('a')], copy.deepcopy(COVERAGE), channel_records=records)
+        self.assertEqual(with_info['channel_stats']['subscribers'], 10_000)
+        self.assertIsNone(scoring.calculate([claim('a')], copy.deepcopy(COVERAGE))['channel_stats'])
+
+    def test_read_info_json_dir_loads_only_info_files_and_rejects_non_objects(self):
+        import tempfile
+        from pathlib import Path as _Path
+        with tempfile.TemporaryDirectory() as tmp:
+            _Path(tmp, 'v1.info.json').write_text('{"channel_id": "UC9", "view_count": 7}', encoding='utf-8')
+            _Path(tmp, 'notes.txt').write_text('ignored', encoding='utf-8')
+            records = scoring.read_info_json_dir(tmp)
+            self.assertEqual(records, [{'channel_id': 'UC9', 'view_count': 7}])
+            _Path(tmp, 'v2.info.json').write_text('[1, 2]', encoding='utf-8')
+            with self.assertRaises(ValueError):
+                scoring.read_info_json_dir(tmp)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -77,7 +77,7 @@ Markdown front matter 保存 source_id/title/source_url/published_at/language/tr
 
 locator 包含 kind=`timestamp|paragraph|character|page`、start、end；单位和字符编码定义可扩展，时间用相对原媒体的秒数，不是切片内部秒数。自动转录无时间戳时使用段落，不伪造视频秒数。引用要在 raw 或规范化文本中找回；必要时 raw_locator、normalized_locator 同时保存。
 
-endorsement=`endorsed|quoted|rejected|unclear`；转述别人的断言不自动算主讲人的。引用包含的可观察事实（如“某人曾说 X”）可以另建一条关于引述准确性的 claim。
+endorsement=`endorsed|quoted|rejected|mocked|unclear`；转述别人的断言不自动算主讲人的。`mocked` 表示说话者以讽刺、挖苦或反讽方式复述传闻（如把“据消息人士透露”拿来取笑），本人并不认可；它与 `rejected` 一样不进入个人分数，也不计入个人误报或传闻扣分。引用包含的可观察事实（如“某人曾说 X”）可以另建一条关于引述准确性的 claim。
 
 ### Claim
 
@@ -87,6 +87,7 @@ endorsement=`endorsed|quoted|rejected|unclear`；转述别人的断言不自动�
 - 归属：empirical、endorsement、attribution_confidence=`high|medium|low`。
 - 两条轴：quantifiability、verifiability；含糊和偏好不能混为一类。
 - 出处与可查证度：可选 `citation_status`（`primary_cited|secondary_cited|uncited_specific|uncited_vague`，或 null）与 `citation_text`（说话者使用的原始出处短语，无则 null）；缺省视为未标注（旧账本兼容）。合并时非法枚举直接报错。
+- 来源层级：可选 `cited_source_tier`（`authoritative_primary|reputable_media|low_credibility_or_rumor|unnamed_insider|none`，或 null）。它是 claim 级字段，计分只读 claim 上的值；occurrence 上可同样标注，作为该原话的副本。缺省视为未标注，非法值直接报错。
 - 可检验性：accountability_eligible（有原文支持的清晰可操作规则）、criteria。
 - 状态：lifecycle、reason、due_for_assessment、outcome、resolved_at、next_check_at。
 - 预测难度与时间：可选 `difficulty`（`trivial|moderate|hard|non_consensus`）、`difficulty_score`（1–5）、`difficulty_rationale`（事前评估理由）、`first_stated_at`、`target_date`；带期限预测须满足 `window_end > first_stated_at`，脚本据此计算 `lead_time_days`。

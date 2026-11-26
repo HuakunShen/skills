@@ -387,6 +387,15 @@ class AuditRunTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'invalid citation_status'):
             self._merge_single_claim({'citation_status': 'trust_me_bro'})
 
+    def test_merge_extraction_carries_cited_source_tier_and_mocked_endorsement(self):
+        merged = self._merge_single_claim({'cited_source_tier': 'unnamed_insider', 'endorsement': 'mocked'})
+        self.assertEqual(merged['cited_source_tier'], 'unnamed_insider')
+        self.assertEqual(merged['endorsement'], 'mocked')
+
+    def test_merge_extraction_rejects_unknown_cited_source_tier(self):
+        with self.assertRaisesRegex(ValueError, 'invalid cited_source_tier'):
+            self._merge_single_claim({'cited_source_tier': 'tabloid'})
+
     def test_build_report_data_no_20_truncation_loads_rationale_quotes_and_hashes(self):
         import audit_pipeline as pipeline
         self.sources([self.source('s1', text='Source text')])

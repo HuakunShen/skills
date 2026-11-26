@@ -50,8 +50,16 @@ worker 只写自己的任务结果文件，例如 `work/<task_id>/result.json` �
 - `uncited_specific`：给出具体数字或日期却没有任何出处（“张口就来”的具体断言），`citation_text` 为 null。
 - `uncited_vague`：含糊断言且无出处、无可核验锚点（“内部消息”“很多人说”），`citation_text` 为 null。
 无法归入以上四类时不要猜测，填 null 并在 reason 中说明。
+为每条 empirical 断言标注 `cited_source_tier`（说话者所引来源的层级，只依据原文措辞判断）：
+- `authoritative_primary`：官方或一手记录（机构的正式报告、法律文本、公司公告原文）。
+- `reputable_media`：有信誉的媒体，且点名了其自身来源。
+- `low_credibility_or_rumor`：八卦小报、聚合号、无法核实的传闻。
+- `unnamed_insider`：“据消息人士透露”“知情人士称”这类匿名内幕，没有任何具名来源。
+- `none`：没有引用任何来源。
+无法判断时填 null，不要猜测。
 提取原文明确的期限与概率；无法确定则 null 并给理由，不能补造。
 严格区分预测与事实的时间顺序：只有目标事件/截止日严格晚于发表时间（target_date > published_at）的断言才能标为 prediction；回顾已发生事件（例如 10 月 1 日视频评论 9 月 30 日事件）必须标为 factual。
+讽刺、反讽与嘲讽护栏（Sarcasm/Mockery Guardrail）：若说话者以讽刺、挖苦、反讽或嘲笑的口吻复述传闻或他人断言（例如把“据消息人士透露”当作笑料、扮演或戏仿），这不是本人的赞同。标为 `endorsement="mocked"`（或 `rejected`），保留能证明语气的原话，不得将其计为本人的传闻、误报或翻车。若语气无法确定，填 `unclear` 并说明，不要猜测。
 标题/封面与正文归属护栏（Title-vs-Speech Guardrail）：所有进入个人计分的 endorsed 断言必须有正文或口述转录中的 original_quote 支撑，绝不能仅凭标题党标题、封面数字或缩略图将主张归给说话者；若标题断言在正文中未提及、被弱化为假设/提问或被本人否定，不得标为 endorsed，须以正文原话为准（如需记录标题偏差，单独注明 source_surface="title_only"、endorsement="unclear"、attribution_confidence="low"）。
 记录原文中的确信措辞，不把“可能”“必然”等自动映射成数值概率。
 多人节目区分本人赞同、引用、反驳和未知归属。疑似转录错误列为复核项。

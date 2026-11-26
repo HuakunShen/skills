@@ -25,7 +25,7 @@ EXTRACTION_PROTECTED_CLAIM_FIELDS = frozenset({
     "reopen_history", "quote_verified", "trigger_assessment",
 })
 OPTIONAL_OCCURRENCE_FIELDS = (
-    "technical_duplicate_of", "raw_locator", "normalized_locator", "transcript_uncertain",
+    "technical_duplicate_of", "raw_locator", "normalized_locator", "transcript_uncertain", "cited_source_tier",
 )
 
 
@@ -326,6 +326,9 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                         for opt_key in OPTIONAL_OCCURRENCE_FIELDS:
                             if opt_key in raw_occ and raw_occ[opt_key] is not None:
                                 occ_rec[opt_key] = raw_occ[opt_key]
+                        occ_tier = occ_rec.get("cited_source_tier")
+                        if occ_tier is not None and occ_tier not in common.SOURCE_TIER_WEIGHTS:
+                            raise ValueError(f"Occurrence {oid} has invalid cited_source_tier: {occ_tier!r}")
                         occ_by_id[oid] = occ_rec
                         occurrences.append(occ_rec)
                         added_occ += 1
@@ -343,6 +346,9 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                     citation_text = raw_claim.get("citation_text")
                     if citation_text is not None and not isinstance(citation_text, str):
                         raise ValueError(f"Claim {cid} citation_text must be a string or null")
+                    cited_tier = raw_claim.get("cited_source_tier")
+                    if cited_tier is not None and cited_tier not in common.SOURCE_TIER_WEIGHTS:
+                        raise ValueError(f"Claim {cid} has invalid cited_source_tier: {cited_tier!r}")
                     c_rec = {
                         "schema_version": 1, "claim_id": cid, "subject_id": raw_claim.get("subject_id", cfg["subject"]),
                         "occurrence_ids": occ_ids, "text": raw_claim["text"], "domain": raw_claim.get("domain", "general"),
@@ -751,6 +757,8 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 case_obj["lead_time_days"] = lead_time_days
             case_obj["verdict"] = c.get("outcome")
             case_obj["citation_status"] = c.get("citation_status")
+            if c.get("cited_source_tier") is not None:
+                case_obj["cited_source_tier"] = c["cited_source_tier"]
             case_obj["evidence_urls"] = [url_by_id[eid] for eid in ev_ids if eid in url_by_id]
             case_obj["notable"] = bool(is_resolved or is_notable_pending or is_notable_hypothetical)
             if first_quote:

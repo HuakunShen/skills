@@ -18,6 +18,11 @@ DIFFICULTY_TIERS = ("trivial", "moderate", "hard", "non_consensus")
 DIFFICULTY_SCORE_TO_TIER = {1: "trivial", 2: "moderate", 3: "moderate", 4: "hard", 5: "non_consensus"}
 HORIZON_BUCKETS = ("le_30d", "31_90d", "91_180d", "181_365d", "gt_365d")
 CITATION_STATUSES = ("primary_cited", "secondary_cited", "uncited_specific", "uncited_vague")
+# Weight of the source the speaker cites (cited_source_tier), used for source_quality_score (0-100).
+SOURCE_TIER_WEIGHTS = {
+    "authoritative_primary": 1.0, "reputable_media": 0.75, "low_credibility_or_rumor": 0.25,
+    "unnamed_insider": 0.1, "none": 0.0,
+}
 
 BIDI_CONTROLS = frozenset({
     "\u200e", "\u200f", "\u061c",

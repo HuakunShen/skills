@@ -91,6 +91,29 @@ I18N = {
         "overconfidence": "高确信度差距",
         "overconfidence_note": "整体支持率减去高确信度支持率；正值表示高确信度表述更不准",
         "credibility_legacy": "本次 metrics.json 不含事实可信度或难度加权字段（旧版运行）；用当前脚本重算后即可显示。",
+        "backfire_group": "翻车与引用来源（客观核查）",
+        "backfire_group_note": "翻车率 = 被证伪 / 可裁定；<10% 绿，10–25% 黄，>25% 红",
+        "backfire_rate": "翻车率",
+        "backfire_note": "被证伪 / 可裁定事实与预测",
+        "prediction_backfire_rate": "预测翻车率",
+        "prediction_backfire_note": "仅预测类：被证伪 / 可裁定预测",
+        "source_quality": "引用来源可信度",
+        "source_quality_note": "按所引来源层级加权：一手 1.0 · 主流媒体 0.75 · 低可信/传闻 0.25 · 匿名内幕 0.1 · 未引 0",
+        "channel_group": "YouTube 频道互动健康度",
+        "channel_group_note": "yt-dlp info.json 的启发式基准，不是真实性裁决",
+        "channel_subs": "订阅者",
+        "channel_v2s": "订阅—播放比",
+        "channel_like": "点赞/播放",
+        "channel_comment": "评论/播放",
+        "channel_engagement": "互动率",
+        "channel_avg": "逐片均值",
+        "channel_flags": "异常标记",
+        "channel_videos": "视频样本",
+        "channel_benchmark": "基准",
+        "channel_status": {"below": "低于基准", "within": "基准内", "above": "高于基准"},
+        "channel_flag_labels": {"normal": "正常", "ghost_subscribers": "疑似僵尸或买粉订阅（订阅—播放比 < 1%）",
+                                "bot_view_inflation": "疑似刷播放（点赞/播放 < 0.3%）",
+                                "engagement_spike": "互动异常偏高（点赞/播放 > 20%）", "insufficient_data": "数据不足"},
         "tl_green": "绿灯", "tl_yellow": "黄灯", "tl_red": "红灯",
         "traffic_legend": "交通灯：正向指标 绿 ≥80% · 黄 60–79.9% · 红 <60%；错误率 绿 <5% · 黄 5–15% · 红 >15%",
         "subjective_models": "评分模型",
@@ -260,6 +283,29 @@ I18N = {
         "overconfidence": "High-certainty gap",
         "overconfidence_note": "overall support minus high-certainty support; positive means high-certainty wording is less accurate",
         "credibility_legacy": "This metrics.json predates factual credibility and difficulty-weighted fields; recompute it with the current scripts to display them.",
+        "backfire_group": "Backfire & sourcing (objective check)",
+        "backfire_group_note": "Backfire rate = contradicted / adjudicated; <10% green, 10–25% amber, >25% red",
+        "backfire_rate": "Backfire rate",
+        "backfire_note": "contradicted / adjudicated facts and predictions",
+        "prediction_backfire_rate": "Prediction backfire rate",
+        "prediction_backfire_note": "predictions only: contradicted / adjudicated predictions",
+        "source_quality": "Cited-source quality",
+        "source_quality_note": "weighted by cited source tier: primary 1.0 · reputable media 0.75 · low-credibility/rumor 0.25 · unnamed insider 0.1 · none 0",
+        "channel_group": "YouTube channel engagement health",
+        "channel_group_note": "heuristic benchmarks from yt-dlp info.json, not an authenticity verdict",
+        "channel_subs": "Subscribers",
+        "channel_v2s": "Views-to-subscribers",
+        "channel_like": "Likes per view",
+        "channel_comment": "Comments per view",
+        "channel_engagement": "Engagement rate",
+        "channel_avg": "Per-video averages",
+        "channel_flags": "Anomaly flags",
+        "channel_videos": "videos sampled",
+        "channel_benchmark": "benchmark",
+        "channel_status": {"below": "below benchmark", "within": "within benchmark", "above": "above benchmark"},
+        "channel_flag_labels": {"normal": "Normal", "ghost_subscribers": "Possible ghost or bought subscribers (views/subscribers < 1%)",
+                                "bot_view_inflation": "Possible view inflation (likes/views < 0.3%)",
+                                "engagement_spike": "Unusually high engagement (likes/views > 20%)", "insufficient_data": "Insufficient data"},
         "tl_green": "Green", "tl_yellow": "Amber", "tl_red": "Red",
         "traffic_legend": "Traffic lights: higher-is-better green ≥80% · amber 60–79.9% · red <60%; error rates green <5% · amber 5–15% · red >15%",
         "subjective_models": "Scoring models",
@@ -1760,6 +1806,70 @@ def credibility_block(m, t):
     return html_out
 
 
+def _metric_tiles(cards, t):
+    return "".join(
+        f'<div class="metric metric-neutral{" tl-" + light if light else ""}"><div class="metric-label">{light_dot(light, t)}{esc(label)}</div>'
+        f'<div class="metric-value">{esc(value)}</div><div class="metric-note">{esc(detail)}</div></div>'
+        for label, value, detail, light in cards
+    )
+
+
+def backfire_block(m, t):
+    """翻车率 and cited-source quality; both are null-safe for legacy metrics.json files."""
+    rate, pred_rate, sq = m.get("backfire_rate"), m.get("prediction_backfire_rate"), m.get("source_quality_score")
+    if not rate and not pred_rate and not sq:
+        return ""
+    cards = []
+    if rate:
+        cards.append((t["backfire_rate"], percent(rate), f'{rate.get("numerator", 0)} / {rate.get("denominator", 0)}{_ci_text(rate)} · {t["backfire_note"]}', rate.get("traffic_light")))
+    if pred_rate:
+        cards.append((t["prediction_backfire_rate"], percent(pred_rate), f'{pred_rate.get("numerator", 0)} / {pred_rate.get("denominator", 0)} · {t["prediction_backfire_note"]}', pred_rate.get("traffic_light")))
+    if sq:
+        score = sq.get("value")
+        cards.append((t["source_quality"], "—" if score is None else f"{score:.1f}",
+                      f'/ 100 · n = {sq.get("tagged_n", 0)} / {sq.get("population_n", 0)} · {t["source_quality_note"]}',
+                      sq.get("traffic_light")))
+    return (f'<div class="subhead"><h3>{esc(t["backfire_group"])}</h3><span>{esc(t["backfire_group_note"])}</span></div>'
+            f'<div class="metrics">{_metric_tiles(cards, t)}</div>')
+
+
+def channel_health_section(m, lang="zh"):
+    """YouTube channel engagement health from yt-dlp info.json (metrics.json channel_stats); empty when absent."""
+    t = I18N[lang]
+    ch = m.get("channel_stats")
+    if not ch:
+        return ""
+
+    def bench(key):
+        obj = ch.get(key) or {}
+        low, high = obj.get("benchmark") or [None, None]
+        status = t["channel_status"].get(obj.get("status"), "")
+        detail = f'{t["channel_benchmark"]} {low * 100:g}–{high * 100:g}%' + (f' · {status}' if status else "")
+        return detail
+
+    cards = [
+        (t["channel_subs"], "—" if ch.get("subscribers") is None else f'{ch["subscribers"]:,.0f}', f'{t["channel_videos"]}: {ch.get("video_n", 0)}', None),
+        (t["channel_v2s"], percent(ch.get("views_to_subscribers_ratio")), bench("views_to_subscribers_ratio"), None),
+        (t["channel_like"], percent(ch.get("like_to_view_ratio")), bench("like_to_view_ratio"), None),
+        (t["channel_comment"], percent(ch.get("comment_to_view_ratio")), bench("comment_to_view_ratio"), None),
+        (t["channel_engagement"], percent(ch.get("engagement_rate")), bench("engagement_rate"), None),
+    ]
+    flag_chips = "".join(
+        f'<span class="kpi-chip {"chip-emerald" if flag == "normal" else "chip-rose"}">{esc(t["channel_flag_labels"].get(flag, flag))}</span>'
+        for flag in ch.get("anomaly_flags") or []
+    )
+    avg_rows = [(t["channel_avg"] + " · " + k, ch.get(src)) for k, src in (
+        ("avg_views", "avg_views"), ("median_views", "median_views"), ("avg_likes", "avg_likes"), ("avg_comments", "avg_comments"))]
+    avg_html = "".join(f'<tr><td>{esc(label)}</td><td>{"—" if value is None else f"{value:,.1f}"}</td></tr>' for label, value in avg_rows)
+    return (
+        f'<div class="card viz-card"><div class="card-header"><h3>{esc(t["channel_group"])}</h3>'
+        f'<div class="card-header-sub">{esc(t["channel_group_note"])}</div></div>'
+        f'<div class="kpi-chips"><span class="kpi-chip chip-sky">{esc(t["channel_flags"])}</span>{flag_chips}</div>'
+        f'<div class="metrics">{_metric_tiles(cards, t)}</div>'
+        f'<div class="table-wrap"><table><tbody>{avg_html}</tbody></table></div></div>'
+    )
+
+
 def subjective_attribution_html(data, prepared, t):
     p = data["panel"]
     dims = [d["id"] for d in prepared["rubric"]["dimensions"]]
@@ -1887,6 +1997,7 @@ def objective_metrics(data, lang="zh"):
         for label, value, note, tone_cls, light in cards
     ) + '</div>'
     html_out += credibility_block(m, t)
+    html_out += backfire_block(m, t)
 
     # Mandatory methodology disclosures: prediction vs factual split, S/C/M, lifecycle, evidence quality, domains.
     disclosures = []
@@ -2026,6 +2137,7 @@ def objective_metrics(data, lang="zh"):
                 f'<tbody>{"".join(h_rows)}</tbody></table></div></div>'
             )
     html_out += render_sourcing_rigor_section(m, lang=lang)
+    html_out += channel_health_section(m, lang=lang)
     return html_out
 
 

@@ -43,6 +43,25 @@ HIGH_CERTAINTY_MARKERS = ("一定", "肯定", "必然", "毫无疑问", "百分�
                           "definitely", "certainly", "certain", "no doubt", "guarantee", "sure")
 HEDGE_MARKERS = ("不一定", "不确定", "可能", "或许", "也许", "unsure", "uncertain", "not sure", "might", "may", "possibly", "perhaps")
 TRAFFIC_LIGHTS = ("green", "yellow", "red")
+# "mocked" = the speaker repeats a rumor only to ridicule or disavow it (sarcasm/irony); like "rejected"
+# it is outside the speaker's own endorsed population, so it never feeds misinformation or backfire rates.
+ENDORSEMENTS = {"endorsed", "quoted", "rejected", "mocked", "unclear"}
+# Backfire (翻车率) = contradicted / categorical: green < 10%, yellow 10%-25%, red > 25%.
+BACKFIRE_LIMITS = (0.10, 0.25)
+# Channel-level engagement health from yt-dlp info.json. Ranges are heuristic benchmarks, not ground truth.
+PLATFORM_FIELDS = {
+    "youtube": {"subscribers": "channel_follower_count", "views": "view_count",
+                "likes": "like_count", "comments": "comment_count", "channel": "channel_id"},
+}
+CHANNEL_BENCHMARKS = {
+    "views_to_subscribers_ratio": (0.10, 0.20),
+    "like_to_view_ratio": (0.015, 0.03),
+    "comment_to_view_ratio": (0.002, 0.005),
+    "engagement_rate": (0.014, 0.035),
+}
+GHOST_SUBSCRIBER_FLOOR = 0.01
+BOT_LIKE_FLOOR = 0.003
+LIKE_SPIKE_CEILING = 0.20
 
 
 def canonical(obj):
@@ -107,7 +126,7 @@ def validate_claim(c):
         "claim_type": KINDS, "lifecycle": LIFECYCLES, "outcome": OUTCOMES,
         "quantifiability": {"numeric", "operationalizable", "qualitative", "none", "unclear"},
         "verifiability": {"verifiable", "conditional", "unverifiable", "unclear"},
-        "endorsement": {"endorsed", "quoted", "rejected", "unclear"},
+        "endorsement": ENDORSEMENTS,
         "attribution_confidence": {"high", "medium", "low"},
         "evaluation_mode": {"categorical", "probabilistic", "none"},
         "probability_origin": {"explicit", "inferred", "none"},
@@ -202,6 +221,9 @@ def validate_claim(c):
     cit_text = c.get("citation_text")
     if cit_text is not None and not isinstance(cit_text, str):
         raise ValueError(f"{cid}: citation_text must be a string or null")
+    cit_tier = c.get("cited_source_tier")
+    if cit_tier is not None and cit_tier not in common.SOURCE_TIER_WEIGHTS:
+        raise ValueError(f"{cid}: invalid cited_source_tier (expected one of {tuple(common.SOURCE_TIER_WEIGHTS)})")
     if c["claim_type"] == "prediction":
         stated_at = common.earliest_stated_at(c)
         target_end = common.claim_target_deadline(c)
@@ -304,6 +326,34 @@ def _sourcing_rigor(claims):
         "unsubstantiated_rate": ratio(unsubstantiated_n, tagged_n, with_ci=True),
         "checkable_rate": ratio(checkable_n, len(population), with_ci=True),
     }
+
+
+def _source_quality(claims):
+    """Mean weight of the source each endorsed empirical claim cites; untagged claims are excluded, not zero."""
+    population = [c for c in claims if c["empirical"] and c["endorsement"] == "endorsed"]
+    tagged = [c for c in population if c.get("cited_source_tier") is not None]
+    tier_counts = {k: sum(c["cited_source_tier"] == k for c in tagged) for k in common.SOURCE_TIER_WEIGHTS}
+    score = round(100 * statistics.mean(common.SOURCE_TIER_WEIGHTS[c["cited_source_tier"]] for c in tagged), 2) if tagged else None
+    return {
+        "value": score, "scale": [0, 100], "traffic_light": traffic_light(score, scale=100),
+        "population_n": len(population), "tagged_n": len(tagged), "untagged_n": len(population) - len(tagged),
+        "tier_counts": tier_counts, "weights": dict(common.SOURCE_TIER_WEIGHTS),
+        "formula": "100 * mean(tier weight) over endorsed empirical claims with cited_source_tier; none=0.0, untagged excluded",
+        "label": "source_quality_index_not_truth_verdict",
+    }
+
+
+def backfire_light(value):
+    """翻车率 tiers: green < 10%, yellow 10%-25%, red > 25%."""
+    if not finite_number(value):
+        return None
+    low, high = BACKFIRE_LIMITS
+    return "green" if value < low else "yellow" if value <= high else "red"
+
+
+def _backfire(ratio_obj):
+    ratio_obj["traffic_light"] = backfire_light(ratio_obj["value"])
+    return ratio_obj
 
 
 def traffic_light(value, *, error_rate=False, scale=1.0):
@@ -474,6 +524,8 @@ def core_metrics(claims, *, bootstrap_clusters=False):
         "unaccepted_due_claims": unaccepted_due,
         "quality_blocked_resolutions": sum(c["lifecycle"] == "resolved" and c["outcome"] in {"supported", "contradicted", "mixed"} and not quality_allows_verdict(c) for c in due),
         "sourcing_rigor": _sourcing_rigor(claims),
+        "source_quality_score": _source_quality(claims),
+        "backfire_rate": _backfire(ratio(counts["contradicted"], len(categorical), with_ci=True)),
     }
 
 
@@ -632,7 +684,90 @@ def validate_policy(p):
         raise ValueError("Composite weights must sum to one")
 
 
-def calculate(claims, coverage, *, composite=False, policy=None, occurrences=None, subject_id=None, bootstrap_clusters=False):
+def read_info_json_dir(path):
+    """Load yt-dlp `*.info.json` records (written by `yt-dlp --write-info-json`) from one directory."""
+    records = []
+    for file in sorted(Path(path).glob("*.info.json")):
+        record = strict_json(file.read_text(encoding="utf-8"))
+        if not isinstance(record, dict):
+            raise ValueError(f"{file.name}: info.json must contain an object")
+        records.append(record)
+    return records
+
+
+def _nonneg(value):
+    return value if finite_number(value) and value >= 0 else None
+
+
+def _benchmark(value, key):
+    low, high = CHANNEL_BENCHMARKS[key]
+    status = None if value is None else "below" if value < low else "above" if value > high else "within"
+    return {"value": None if value is None else round(value, 6), "benchmark": [low, high], "status": status}
+
+
+def channel_stats(records, platform="youtube"):
+    """Channel-level engagement health from per-video yt-dlp metadata. Heuristic, offline, descriptive only."""
+    if platform not in PLATFORM_FIELDS:
+        raise ValueError(f"Unsupported platform for channel_stats: {platform}")
+    fields = PLATFORM_FIELDS[platform]
+    channels = {r[fields["channel"]] for r in records if r.get(fields["channel"])}
+    if len(channels) > 1:
+        raise ValueError("Multiple channels in info.json records: select one channel's videos")
+
+    def values(key):
+        return [v for v in (_nonneg(r.get(fields[key])) for r in records) if v is not None]
+
+    def paired_ratio(*keys):
+        # Pool only videos where the view count and every numerator field are present and views > 0.
+        rows = [r for r in records if _nonneg(r.get(fields["views"]))
+                and all(_nonneg(r.get(fields[k])) is not None for k in keys)]
+        total_views = sum(r[fields["views"]] for r in rows)
+        if not rows or not total_views:
+            return None
+        return sum(r[fields[k]] for r in rows for k in keys) / total_views
+
+    subs, views, likes, comments = values("subscribers"), values("views"), values("likes"), values("comments")
+    subscribers = statistics.median(subs) if subs else None
+    median_views = statistics.median(views) if views else None
+    views_to_subs = median_views / subscribers if median_views is not None and subscribers else None
+    like_ratio = paired_ratio("likes")
+    comment_ratio = paired_ratio("comments")
+    engagement = paired_ratio("likes", "comments")
+    flags = []
+    if views_to_subs is not None and views_to_subs < GHOST_SUBSCRIBER_FLOOR:
+        flags.append("ghost_subscribers")
+    if like_ratio is not None and like_ratio < BOT_LIKE_FLOOR:
+        flags.append("bot_view_inflation")
+    if like_ratio is not None and like_ratio > LIKE_SPIKE_CEILING:
+        flags.append("engagement_spike")
+    measured = any(x is not None for x in (views_to_subs, like_ratio, comment_ratio, engagement))
+    if not flags:
+        flags = ["normal"] if measured else ["insufficient_data"]
+    return {
+        "platform": platform, "channel_id": next(iter(channels), None), "video_n": len(records),
+        "subscribers": subscribers,
+        "avg_views": round(statistics.mean(views), 2) if views else None,
+        "median_views": median_views,
+        "avg_likes": round(statistics.mean(likes), 2) if likes else None,
+        "avg_comments": round(statistics.mean(comments), 2) if comments else None,
+        "views_to_subscribers_ratio": _benchmark(views_to_subs, "views_to_subscribers_ratio"),
+        "like_to_view_ratio": _benchmark(like_ratio, "like_to_view_ratio"),
+        "comment_to_view_ratio": _benchmark(comment_ratio, "comment_to_view_ratio"),
+        "engagement_rate": _benchmark(engagement, "engagement_rate"),
+        "anomaly_flags": flags,
+        "flag_thresholds": {"ghost_subscribers_below": GHOST_SUBSCRIBER_FLOOR,
+                            "bot_view_inflation_like_ratio_below": BOT_LIKE_FLOOR,
+                            "engagement_spike_like_ratio_above": LIKE_SPIKE_CEILING},
+        "formulas": {"views_to_subscribers_ratio": "median per-video view_count / subscribers",
+                     "like_to_view_ratio": "sum(like_count) / sum(view_count) over videos with both",
+                     "comment_to_view_ratio": "sum(comment_count) / sum(view_count) over videos with both",
+                     "engagement_rate": "(sum(like_count) + sum(comment_count)) / sum(view_count) over videos with all three"},
+        "label": "channel_engagement_heuristic_not_authenticity_verdict",
+    }
+
+
+def calculate(claims, coverage, *, composite=False, policy=None, occurrences=None, subject_id=None, bootstrap_clusters=False,
+              channel_records=None):
     policy = POLICY.copy() if policy is None else policy
     validate_policy(policy)
     seen = set()
@@ -705,9 +840,13 @@ def calculate(claims, coverage, *, composite=False, policy=None, occurrences=Non
         tier: core_metrics([c for c in claims if common.resolve_difficulty_tier(c) == tier], bootstrap_clusters=bootstrap_clusters)
         for tier in diff_order if tier in present_diffs
     }
+    metrics["channel_stats"] = channel_stats(channel_records) if channel_records is not None else None
     metrics["prediction_difficulty"] = _prediction_difficulty_stats(claims, bootstrap_clusters=bootstrap_clusters)
     metrics["prediction_horizon"] = _prediction_horizon_stats(claims, bootstrap_clusters=bootstrap_clusters)
     metrics["factual_credibility"] = _factual_credibility(claims)
+    metrics["prediction_backfire_rate"] = core_metrics(
+        [c for c in claims if c["claim_type"] == "prediction"], bootstrap_clusters=bootstrap_clusters
+    )["backfire_rate"]
     metrics["difficulty_adjusted"] = _difficulty_adjusted(claims)
     metrics["selection_funnel"] = {
         "total_canonical_claims": len(claims),
@@ -843,9 +982,11 @@ def score_run(args):
                     c = {**c, "first_stated_at": stated}
             enriched_claims.append(c)
         enriched_selected = [c for c in enriched_claims if args.subject_id is None or c.get("subject_id") == args.subject_id]
+        info_dir = getattr(args, "info_json_dir", None)
         metrics = calculate(enriched_claims, coverage, composite=args.composite, policy=policy,
                             occurrences=occurrences, subject_id=args.subject_id,
-                            bootstrap_clusters=getattr(args, "bootstrap_clusters", False))
+                            bootstrap_clusters=getattr(args, "bootstrap_clusters", False),
+                            channel_records=read_info_json_dir(info_dir) if info_dir else None)
         metrics["acceptance_verification"] = {
             "verified_resolutions": verified, "as_of": cfg["scope"]["as_of"],
             "policy": "recomputed_consensus_and_bound_evidence",
@@ -870,6 +1011,7 @@ def main(argv=None):
     p.add_argument("--csv")
     p.add_argument("--composite", action="store_true")
     p.add_argument("--bootstrap-clusters", action="store_true", help="Compute family_id cluster bootstrap 95%% CI")
+    p.add_argument("--info-json-dir", help="Directory of yt-dlp *.info.json files for one channel -> metrics.json channel_stats")
     p.add_argument("--scoring-policy", help="Full JSON override of the documented heuristic scoring gates")
     p.add_argument("--model-policy", help="Frozen model policy; defaults to RUN/config/model-policy.json")
     args = p.parse_args(argv)

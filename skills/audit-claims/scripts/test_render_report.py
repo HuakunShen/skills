@@ -602,5 +602,52 @@ class CredibilityDashboardRenderTests(unittest.TestCase):
         self.assertEqual(renderer.render_explorer(data, renderer.I18N['en']), '')
 
 
+class BackfireAndChannelRenderTests(unittest.TestCase):
+    def metrics(self):
+        import test_score_claims as fixtures
+        scoring = renderer.scoring
+        rows = [
+            fixtures.claim('s1', claim_type='factual', outcome='supported', cited_source_tier='authoritative_primary'),
+            fixtures.claim('c1', claim_type='factual', outcome='contradicted', citation_status='uncited_specific',
+                           cited_source_tier='low_credibility_or_rumor'),
+            fixtures.claim('m1', claim_type='factual', outcome='mixed', cited_source_tier='unnamed_insider'),
+            fixtures.claim('p1', claim_type='prediction', outcome='contradicted'),
+            fixtures.claim('rumor', claim_type='factual', outcome='contradicted', endorsement='mocked',
+                           cited_source_tier='unnamed_insider'),
+        ]
+        channel = [{'channel_id': 'UC1', 'channel_follower_count': 1_000_000, 'view_count': 5000,
+                    'like_count': 100, 'comment_count': 10}]
+        return scoring.calculate(rows, {'eligible_sources': 10, 'acquired_sources': 10, 'extracted_sources': 10,
+                                        'inventory_complete': True, 'unresolved_review_issues': 0},
+                                 channel_records=channel)
+
+    def test_backfire_block_shows_rates_with_traffic_light_and_source_quality_in_zh_and_en(self):
+        m = self.metrics()
+        zh = renderer.backfire_block(m, renderer.I18N['zh'])
+        self.assertIn('翻车率', zh)
+        self.assertIn('预测翻车率', zh)
+        self.assertIn('引用来源可信度', zh)
+        self.assertIn('tl-red', zh)  # 2 of 4 adjudicated claims contradicted: above the 25% line
+        self.assertIn('45.0', zh)
+        en = renderer.backfire_block(m, renderer.I18N['en'])
+        self.assertIn('Backfire rate', en)
+        self.assertIn('Cited-source quality', en)
+        self.assertIsNone(re.search(r'[\u3400-\u9fff\uff00-\uffef]', en))
+        self.assertEqual(renderer.backfire_block({}, renderer.I18N['en']), '')
+
+    def test_channel_health_section_renders_benchmarks_and_flags_and_is_absent_without_channel_data(self):
+        m = self.metrics()
+        zh = renderer.channel_health_section(m, lang='zh')
+        self.assertIn('YouTube 频道互动健康度', zh)
+        self.assertIn('1,000,000', zh)
+        self.assertIn('疑似僵尸或买粉订阅', zh)
+        en = renderer.channel_health_section(m, lang='en')
+        self.assertIn('YouTube channel engagement health', en)
+        self.assertIn('Possible ghost or bought subscribers', en)
+        self.assertIsNone(re.search(r'[\u3400-\u9fff\uff00-\uffef]', en))
+        self.assertEqual(renderer.channel_health_section({'channel_stats': None}, lang='en'), '')
+        self.assertEqual(renderer.channel_health_section({}, lang='zh'), '')
+
+
 if __name__ == '__main__':
     unittest.main()

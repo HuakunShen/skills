@@ -149,7 +149,26 @@ python3 scripts/transcribe_openai.py run \
 
 创作者常在 YouTube 简介里放参考链接和报告名，但这些文字不被口述，只读字幕会漏掉。用 `yt-dlp --write-info-json` 下载时，在摄取 manifest 中给出 `info_json`（相对 manifest 的路径，读取其中的 `description`），或直接给出 `description` 字符串。`normalize_sources.py` 会把非空简介追加为正文末尾的独立段落：正文标注 `Uploader description (written text, not spoken in the video)`，定位为 `p-XXXXXX`（`origin=video_description`）。frontmatter 记录 `description_origin`、`description_locator_id`、`description_sha256`。引用简介时使用该段落的定位，并按 worker-prompts 的简介护栏标注 `source_surface="video_description"`。
 
-### 屏幕图表与结尾参考卡（ffmpeg 定向抽帧）
+### 直接读取视频（默认关闭，显式开启）
+
+默认**不下载完整视频，也不把完整视频交给多模态 LLM**。480p 视频约 106–110 tokens/s，一段 10 分钟视频约 80K tokens，成本与时长成正比，且远超定位出处所需的信息量。默认路径依次为：字幕 / STT → 视频简介 → 结尾卡与断言时间点的定向 ffmpeg 抽帧（见下文）。
+
+只在以下两种情形开启直接读取，并须满足全部条件：
+
+- **用户明确要求**直接读取视频画面（如“直接看视频”“读一下画面上的图表”）；或
+- **图表密集的频道**中，口述始终缺失出处，经用户确认后才开启。
+
+开启后的约束：
+
+1. 使用 480p 或更低分辨率的视频流（如 `yt-dlp -f "bv*[height<=480]"`），不要下载更高清版本。
+2. 使用低推理强度的模型，例如 `gemini-4-hydrogen-low`。模型 ID 与价格须在运行前对照供应商当前列表重新核验，不沿用本文档的示例值。
+3. 提示词只要求抽取屏幕上的图表标题、单位、数值、水印 / 机构标识与结尾参考卡上的报告名、链接，并按 `visual_evidence` 结构返回；不要让模型据此重写或补全观点原话。
+4. 先按整段时长估算 token 与费用，经 [budgeting.md](budgeting.md) 的流程取得授权；超出授权偏差时暂停。
+5. 视频文件仍放在 `media/`（被 Git 忽略），模型输出写入 `work/results/` 并登记 checkpoint，与定向抽帧的记录格式相同。
+
+直接读取的结果同样受 `visual_evidence` 规则约束：没有口述采纳时，归属置信度不高于 `medium`，endorsement 用 `unclear`。
+
+### 屏幕图表与结尾参考卡（ffmpeg 定向抽帧，默认路径）
 
 只在需要时抽帧，不逐帧扫描整段视频。前提是 `ffmpeg`/`ffprobe` 可用，视频为 run 的 `media/` 中的本地文件；帧图放在 `media/frames/`（被 Git 忽略）。
 

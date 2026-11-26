@@ -143,6 +143,37 @@ python3 scripts/transcribe_openai.py run \
 
 抽检数字、日期、单位、专有名词、否定词与说话人归属。对混合语言、方言、多人重叠以及低质量录音增加抽检。不确定片段保留原文和定位，使用 `transcript_uncertain` 标记；不要让 STT 错字变成说话人的错误。静音或空转录不作为观点；对返回文本异常短的长录音检查是否截断。在摄取 manifest 中提供 `media_duration_seconds`、`transcription` 与可选 `quality_flags`，`normalize_sources.py` 会自动检测 ≥5 条连续相同短 cue（`stt_tail_hallucination` / `stt_repeated_cue_hallucination`）及 `end_seconds > media_duration_seconds`（`stt_duration_overflow`）并写入元数据与 `.locators.json` 诊断字段，不静默删改原始文本。把转录模型、运行时间、原始音频哈希和质量标记写入源文件元数据。
 
+## 视频简介与屏幕视觉核验（Description & Visual Check）
+
+### 简介（description）
+
+创作者常在 YouTube 简介里放参考链接和报告名，但这些文字不被口述，只读字幕会漏掉。用 `yt-dlp --write-info-json` 下载时，在摄取 manifest 中给出 `info_json`（相对 manifest 的路径，读取其中的 `description`），或直接给出 `description` 字符串。`normalize_sources.py` 会把非空简介追加为正文末尾的独立段落：正文标注 `Uploader description (written text, not spoken in the video)`，定位为 `p-XXXXXX`（`origin=video_description`）。frontmatter 记录 `description_origin`、`description_locator_id`、`description_sha256`。引用简介时使用该段落的定位，并按 worker-prompts 的简介护栏标注 `source_surface="video_description"`。
+
+### 屏幕图表与结尾参考卡（ffmpeg 定向抽帧）
+
+只在需要时抽帧，不逐帧扫描整段视频。前提是 `ffmpeg`/`ffprobe` 可用，视频为 run 的 `media/` 中的本地文件；帧图放在 `media/frames/`（被 Git 忽略）。
+
+1. **结尾参考卡**：只看最后 15 秒，每 2 秒一帧。`-sseof` 相对文件末尾，不需要先算时长：
+
+```sh
+mkdir -p media/frames/<source_id>
+ffmpeg -hide_banner -loglevel error -sseof -15 -i media/<source_id>.mp4 -vf "fps=1/2" -q:v 2 media/frames/<source_id>/end_%02d.jpg
+```
+
+读取这些帧，若出现报告名、机构、链接或数据来源，就把它作为该视频的候选出处，并与简介中的链接对照。
+
+2. **屏幕图表（口头未说出出处）**：只对已抽出的、声称“图上 / 表里 / 屏幕上”的断言，取断言出现的时间 `T`（字幕 cue 的起点秒数），在 `T` 处抽 1 帧。若看不清，再在 `[T-5, T+10]` 内补抽，每条断言最多 3 帧：
+
+```sh
+ffmpeg -hide_banner -loglevel error -ss <T> -i media/<source_id>.mp4 -frames:v 1 -q:v 2 media/frames/<source_id>/<claim_id>_<T>.jpg
+```
+
+`-ss` 放在 `-i` 之前是快速定位，精度为关键帧级，足以核对图表标题、单位和坐标轴。用 Read 工具读取图像后记录读数。
+
+3. **记录**：在 claim 的 `visual_evidence` 数组中写入每帧的相对路径、sha256、秒数、可读的标题 / 单位 / 数值（如实转写，看不清的部分留空，不补全），以及 `source_surface`（`on_screen_chart` 或 `end_card`）。`visual_evidence` 不能替代 `original_quote`：创作者没有口述采纳该图时，归属置信度不高于 `medium`，endorsement 用 `unclear`。
+
+4. **成本**：视觉核验只对已标记的断言执行。帧图不进入 Git 跟踪的快照。
+
 ## 参考来源
 
 接口核验日期：2026-11-25；价格须每次运行重新确认。

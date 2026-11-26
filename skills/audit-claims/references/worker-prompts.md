@@ -60,6 +60,8 @@ worker 只写自己的任务结果文件，例如 `work/<task_id>/result.json` �
 提取原文明确的期限与概率；无法确定则 null 并给理由，不能补造。
 严格区分预测与事实的时间顺序：只有目标事件/截止日严格晚于发表时间（target_date > published_at）的断言才能标为 prediction；回顾已发生事件（例如 10 月 1 日视频评论 9 月 30 日事件）必须标为 factual。
 讽刺、反讽与嘲讽护栏（Sarcasm/Mockery Guardrail）：若说话者以讽刺、挖苦、反讽或嘲笑的口吻复述传闻或他人断言（例如把“据消息人士透露”当作笑料、扮演或戏仿），这不是本人的赞同。标为 `endorsement="mocked"`（或 `rejected`），保留能证明语气的原话，不得将其计为本人的传闻、误报或翻车。若语气无法确定，填 `unclear` 并说明，不要猜测。
+简介护栏（Description Guardrail）：视频简介（description）由创作者书写，但不是口述。简介中的断言可以抽取，标 `source_surface="video_description"`；只有正文或口述原话采纳了它，才可记为 endorsed。仅出现在简介里的断言标 `endorsement="unclear"`，不计入个人分数。简介中的链接或报告名作为 `citation_text` 时，按出处规则如实标注 `citation_status`。
+屏幕图表护栏（On-Screen Chart Guardrail）：只有画面中出现图表、表格、截图或结尾参考卡，而口述中没有出处时，才按 transcription.md 的定向抽帧配方核验（最后 15 秒的参考卡，或断言时间 `T` 处的单帧）。记录 `source_surface="on_screen_chart"` 或 `"end_card"`、帧路径、sha256 与读数。画面中的数字不等于说话者的断言，口述未采纳时不得 endorsed；不要为整段视频逐帧扫描。
 标题/封面与正文归属护栏（Title-vs-Speech Guardrail）：所有进入个人计分的 endorsed 断言必须有正文或口述转录中的 original_quote 支撑，绝不能仅凭标题党标题、封面数字或缩略图将主张归给说话者；若标题断言在正文中未提及、被弱化为假设/提问或被本人否定，不得标为 endorsed，须以正文原话为准（如需记录标题偏差，单独注明 source_surface="title_only"、endorsement="unclear"、attribution_confidence="low"）。
 记录原文中的确信措辞，不把“可能”“必然”等自动映射成数值概率。
 多人节目区分本人赞同、引用、反驳和未知归属。疑似转录错误列为复核项。

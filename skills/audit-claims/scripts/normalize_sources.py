@@ -316,6 +316,47 @@ def json_transcript(text, locator_mode="compact"):
     return body, kind, count, locators, skipped_empty, cues
 
 
+def source_description(record, sid, manifest_dir):
+    """Uploader-written description from the manifest `description` or a yt-dlp `info_json` file.
+
+    Returns (text, origin) or (None, None). Descriptions are written text, not speech, so the caller
+    keeps them in a separate paragraph that extraction must cite with its own locator.
+    """
+    if record.get("description") is not None:
+        value, origin = record["description"], "manifest"
+    elif record.get("info_json") is not None:
+        value, origin = None, "info_json"
+        info_path = manifest_path(record["info_json"], sid, manifest_dir, "info_json")
+        if not info_path.is_file():
+            raise ValueError(f"Source {sid} info_json file is missing")
+        if info_path.stat().st_size > 16 * 1024 * 1024:
+            raise ValueError(f"Source {sid} info_json exceeds 16 MiB; pass description in the manifest instead")
+        info = json.loads(info_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(info, dict):
+            raise ValueError(f"Source {sid} info_json must contain an object")
+        value = info.get("description")
+    else:
+        return None, None
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        raise ValueError(f"Source {sid} description must be a string or null")
+    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return (text or None), origin
+
+
+def manifest_path(value, sid, manifest_dir, label):
+    """Resolve a manifest-relative path; refuse absolute paths and anything outside the manifest directory."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Source {sid} {label} must be a relative path string")
+    manifest_root = Path(manifest_dir).resolve()
+    path = Path(value)
+    resolved = (manifest_root / path).resolve()
+    if path.is_absolute() or not resolved.is_relative_to(manifest_root):
+        raise ValueError(f"Source {sid} {label} must remain under the manifest directory")
+    return resolved
+
+
 def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact", clean_youtube_vtt=False):
     sid = record.get("source_id")
     if not isinstance(sid, str) or not SAFE_ID.fullmatch(sid):
@@ -367,6 +408,18 @@ def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact",
             text, fmt, locator_mode=locator_mode, clean_youtube_vtt=clean_youtube_vtt)
     else:
         body, locator_kind, locator_count, locators, skipped_empty, cues = json_transcript(text, locator_mode=locator_mode)
+    description, description_origin = source_description(record, sid, manifest_dir)
+    description_locator = None
+    if description:
+        description, _ = sanitize_body_text(description)
+        # Paragraph-kind locator so extraction can cite it like any paragraph; the heading makes it clear
+        # the words were written by the uploader and were not spoken in the video.
+        description_locator = {"id": f"p-{locator_count + 1:06d}", "kind": "paragraph",
+                               "original_line_start": None, "original_line_end": None, "origin": "video_description"}
+        body = (body.rstrip("\n") + "\n\n" + compact_marker(description_locator)
+                + "Uploader description (written text, not spoken in the video):\n" + description + "\n")
+        locators = list(locators) + [description_locator]
+        locator_count += 1
     transcription = record.get("transcription")
     if transcription is not None and not isinstance(transcription, dict):
         raise ValueError(f"Source {sid} transcription metadata must be an object or null")
@@ -397,6 +450,10 @@ def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact",
         metadata["media_duration_seconds"] = media_duration
     if transcription is not None:
         metadata["transcription"] = transcription
+    if description_locator is not None:
+        metadata["description_origin"] = description_origin
+        metadata["description_locator_id"] = description_locator["id"]
+        metadata["description_sha256"] = __import__("hashlib").sha256(description.encode("utf-8")).hexdigest()
     if merged_flags or provided_flags is not None:
         metadata["quality_flags"] = merged_flags
     fingerprint = ledger.digest(metadata)

@@ -49,6 +49,41 @@ class NormalizeTests(unittest.TestCase):
         source = ledger.read_jsonl(self.run / 'sources.jsonl')[0]
         self.assertEqual(source['content_hash'], hashlib.sha256((self.run / source['content_path']).read_bytes()).hexdigest())
 
+    def test_manifest_description_is_a_separate_citable_paragraph_after_the_transcript(self):
+        self.ingest([self.item(description='Full report: https://example.org/report.pdf\r\nSource: BLS')])
+        normalized = (self.run / 'sources/a.md').read_text()
+        self.assertIn('Uploader description (written text, not spoken in the video)', normalized)
+        self.assertTrue(normalized.index('Second paragraph.') < normalized.index('[#p-000003]'))
+        sidecar = json.loads((self.run / 'sources/a.locators.json').read_text())
+        self.assertEqual(sidecar['locators'][-1]['origin'], 'video_description')
+        source = ledger.read_jsonl(self.run / 'sources.jsonl')[0]
+        self.assertEqual(source['description_origin'], 'manifest')
+        self.assertEqual(source['description_locator_id'], 'p-000003')
+        self.assertEqual(source['description_sha256'], hashlib.sha256(
+            'Full report: https://example.org/report.pdf\nSource: BLS'.encode('utf-8')).hexdigest())
+        # The description is citable: a quote from it verifies against its own paragraph locator.
+        import audit_pipeline as pipeline
+        ok, basis = pipeline._verify_quote_in_source(normalized, {'kind': 'paragraph', 'start': 3, 'end': 3},
+                                                     'https://example.org/report.pdf')
+        self.assertTrue(ok)
+
+    def test_info_json_description_is_read_from_manifest_relative_file_only(self):
+        (self.inputs / 'a.info.json').write_text(json.dumps({'id': 'x', 'description': 'See FRED series CPIAUCSL.'}),
+                                                encoding='utf-8')
+        self.ingest([self.item(info_json='a.info.json')])
+        source = ledger.read_jsonl(self.run / 'sources.jsonl')[0]
+        self.assertEqual(source['description_origin'], 'info_json')
+        self.assertIn('FRED series CPIAUCSL.', (self.run / 'sources/a.md').read_text())
+        with self.assertRaisesRegex(ValueError, 'must remain under the manifest directory'):
+            self.ingest([self.item(sid='b', info_json='../outside.info.json')])
+
+    def test_sources_without_description_stay_unchanged(self):
+        self.ingest([self.item()])
+        normalized = (self.run / 'sources/a.md').read_text()
+        self.assertNotIn('Uploader description', normalized)
+        source = ledger.read_jsonl(self.run / 'sources.jsonl')[0]
+        self.assertNotIn('description_origin', source)
+
     def test_srt_keeps_overlapping_cues_without_dedup(self):
         srt = '1\n00:00:01,000 --> 00:00:03,000\nHello 世界\n\n2\n00:00:02,000 --> 00:00:04,000\nHello 世界\n'
         self.ingest([self.item(content=srt, extension='srt')])

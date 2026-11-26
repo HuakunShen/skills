@@ -379,5 +379,114 @@ class SourcingRigorTests(unittest.TestCase):
 
 
 
+
+class CredibilityAndDifficultyTests(unittest.TestCase):
+    def calculate(self, rows):
+        return scoring.calculate(rows, copy.deepcopy(COVERAGE))
+
+    def test_traffic_light_thresholds_for_rates_scores_and_error_rates(self):
+        self.assertEqual(scoring.traffic_light(0.80), 'green')
+        self.assertEqual(scoring.traffic_light(0.7999), 'yellow')
+        self.assertEqual(scoring.traffic_light(0.60), 'yellow')
+        self.assertEqual(scoring.traffic_light(0.5999), 'red')
+        self.assertEqual(scoring.traffic_light(85, scale=100), 'green')
+        self.assertEqual(scoring.traffic_light(59.9, scale=100), 'red')
+        self.assertEqual(scoring.traffic_light(0.04, error_rate=True), 'green')
+        self.assertEqual(scoring.traffic_light(0.05, error_rate=True), 'yellow')
+        self.assertEqual(scoring.traffic_light(0.15, error_rate=True), 'yellow')
+        self.assertEqual(scoring.traffic_light(0.1501, error_rate=True), 'red')
+        self.assertIsNone(scoring.traffic_light(None))
+
+    def test_factual_credibility_ignores_predictions_and_penalizes_uncited_contradictions(self):
+        rows = [
+            claim('fs', claim_type='factual', outcome='supported', citation_status='primary_cited'),
+            claim('fm', claim_type='factual', outcome='mixed', citation_status='secondary_cited'),
+            claim('fc', claim_type='factual', outcome='contradicted', citation_status='secondary_cited'),
+            claim('fu', claim_type='factual', outcome='contradicted', citation_status='uncited_specific'),
+            claim('p1', outcome='contradicted', citation_status='uncited_specific'),
+        ]
+        fc = self.calculate(rows)['factual_credibility']
+        self.assertEqual(fc['factual_categorical_n'], 4)
+        self.assertEqual(fc['counts'], {'supported': 1, 'mixed': 1, 'contradicted': 2, 'contradicted_uncited': 1})
+        self.assertAlmostEqual(fc['contradiction_rate']['value'], 0.5)
+        self.assertAlmostEqual(fc['misinformation_rate']['value'], 0.25)
+        self.assertEqual(fc['contradiction_rate']['traffic_light'], 'red')
+        self.assertEqual(fc['misinformation_rate']['traffic_light'], 'red')
+        # credit = 1.0 (supported) + 0.5 (mixed) + 0.0 (cited contradiction) - 0.5 (uncited) = 1.0 of 4
+        self.assertAlmostEqual(fc['factual_honesty_score']['value'], 25.0)
+        self.assertEqual(fc['factual_honesty_score']['traffic_light'], 'red')
+
+    def test_honesty_penalty_orders_uncited_below_cited_contradiction_below_mixed(self):
+        def score(outcome, status):
+            # A supported anchor keeps the population above the 0-100 clipping floor.
+            rows = [claim('anchor', claim_type='factual', outcome='supported', citation_status='primary_cited'),
+                    claim('f', claim_type='factual', outcome=outcome, citation_status=status)]
+            return self.calculate(rows)['factual_credibility']['factual_honesty_score']['value']
+        self.assertAlmostEqual(score('mixed', 'secondary_cited'), 75.0)
+        self.assertAlmostEqual(score('contradicted', 'secondary_cited'), 50.0)
+        self.assertAlmostEqual(score('contradicted', 'uncited_vague'), 25.0)
+        self.assertGreater(score('mixed', 'secondary_cited'), score('contradicted', 'primary_cited'))
+        self.assertGreater(score('contradicted', 'primary_cited'), score('contradicted', 'uncited_vague'))
+
+    def test_difficulty_weighting_stops_trivial_only_track_records_from_scoring_high(self):
+        def pred(cid, tier, outcome='supported'):
+            return claim(cid, first_stated_at='2025-01-01', difficulty=tier, outcome=outcome)
+        trivial_only = [pred(f't{i}', 'trivial') for i in range(3)]
+        hard_only = [pred(f'h{i}', 'hard') for i in range(3)]
+        trivial = self.calculate(trivial_only)['difficulty_adjusted']
+        hard = self.calculate(hard_only)['difficulty_adjusted']
+        self.assertAlmostEqual(trivial['difficulty_adjusted_score']['value'], round(100 * 0.5 / 3, 2))
+        self.assertAlmostEqual(hard['difficulty_adjusted_score']['value'], round(100 * 2.0 / 3, 2))
+        self.assertEqual(trivial['weighted_strict_support_rate'], 1.0)
+        self.assertLess(trivial['difficulty_exposure'], hard['difficulty_exposure'])
+        self.assertLess(trivial['difficulty_adjusted_score']['value'], hard['difficulty_adjusted_score']['value'])
+
+    def test_unrated_predictions_are_excluded_from_weighted_score_but_counted(self):
+        rows = [claim('r1', first_stated_at='2025-01-01', difficulty='non_consensus', outcome='supported'),
+                claim('u1', first_stated_at='2025-01-01', outcome='contradicted')]
+        da = self.calculate(rows)['difficulty_adjusted']
+        self.assertEqual(da['weighted_n'], 1)
+        self.assertEqual(da['unrated_excluded_n'], 1)
+        self.assertAlmostEqual(da['difficulty_adjusted_score']['value'], 100.0)
+
+    def test_overconfidence_gap_uses_certainty_markers_and_respects_hedges(self):
+        rows = [
+            claim('c1', first_stated_at='2025-01-01', outcome='contradicted', certainty_text='我一定会做到'),
+            claim('c2', first_stated_at='2025-01-01', outcome='supported', certainty_text='毫无疑问'),
+            claim('p1', first_stated_at='2025-01-01', outcome='supported'),
+            claim('p2', first_stated_at='2025-01-01', outcome='supported', certainty_text='不一定'),
+        ]
+        gap = self.calculate(rows)['difficulty_adjusted']['overconfidence_gap']
+        self.assertEqual(gap['high_certainty_n'], 2)
+        self.assertAlmostEqual(gap['high_certainty_strict_support_rate'], 0.5)
+        self.assertAlmostEqual(gap['overall_strict_support_rate'], 0.75)
+        self.assertAlmostEqual(gap['value'], 0.25)
+        self.assertFalse(scoring._is_high_certainty(claim('h', certainty_text='不一定会发生')))
+        self.assertIsNone(self.calculate([claim('n1', first_stated_at='2025-01-01')])['difficulty_adjusted']['overconfidence_gap']['value'])
+
+    def test_lead_time_weighted_support_uses_log_weights_on_dated_predictions(self):
+        rows = [claim('a', first_stated_at='2025-01-01', outcome='supported'),
+                claim('b', first_stated_at='2025-01-01', outcome='contradicted')]
+        lead = self.calculate(rows)['difficulty_adjusted']['lead_time_weighted_support_rate']
+        self.assertEqual(lead['dated_n'], 2)
+        self.assertGreater(lead['denominator'], 0)
+        self.assertGreater(lead['value'], 0)
+        self.assertLess(lead['value'], 1)
+        self.assertEqual(lead['weight'], 'log2(1 + max(0, lead_time_days) / 30)')
+
+    def test_legacy_runs_without_new_fields_report_null_not_zero(self):
+        m = self.calculate([claim('legacy', claim_type='factual', outcome='supported')])
+        self.assertIsNone(m['difficulty_adjusted']['difficulty_adjusted_score']['value'])
+        self.assertAlmostEqual(m['factual_credibility']['factual_honesty_score']['value'], 100.0)
+        self.assertIsNone(self.calculate([claim('p')])['factual_credibility']['factual_honesty_score']['value'])
+
+    def test_difficulty_ratings_are_attributed_to_recording_models(self):
+        rows = [claim('m1', first_stated_at='2025-01-01', difficulty='hard', difficulty_model_id='model_a'),
+                claim('m2', first_stated_at='2025-01-01', difficulty='hard', difficulty_model_id='model_a'),
+                claim('m3', first_stated_at='2025-01-01', difficulty='moderate')]
+        raters = self.calculate(rows)['prediction_difficulty']['rated_by_model_id']
+        self.assertEqual(raters, {'model_a': 2, 'unrecorded': 1})
+
+
 if __name__ == '__main__':
     unittest.main()

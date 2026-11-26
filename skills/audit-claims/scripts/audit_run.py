@@ -602,6 +602,7 @@ def parser():
     freeze.add_argument("--difficulty", choices=list(common.DIFFICULTY_TIERS), help="Optional pre-outcome prediction difficulty tier")
     freeze.add_argument("--difficulty-score", type=int, choices=[1, 2, 3, 4, 5], help="Optional pre-outcome prediction difficulty score (1=trivial..5=non_consensus)")
     freeze.add_argument("--difficulty-rationale", help="Optional pre-outcome rationale explaining baseline/consensus difficulty")
+    freeze.add_argument("--difficulty-model-id", help="Model id that assigned the difficulty rating (subjective attribution; reported per model)")
     merge = commands.add_parser("merge-extraction", help="Merge completed extraction shards and verify quotes against sources")
     merge.add_argument("--run", required=True)
     merge.add_argument("--results", nargs="*")
@@ -657,7 +658,7 @@ def main(argv=None):
             output = pipeline.freeze_criteria(
                 sys.modules[__name__], args.run, args.claim_id, args.definition, args.version,
                 difficulty=args.difficulty, difficulty_score=args.difficulty_score,
-                difficulty_rationale=args.difficulty_rationale,
+                difficulty_rationale=args.difficulty_rationale, difficulty_model_id=args.difficulty_model_id,
             )
         elif args.command == "merge-extraction":
             output = pipeline.merge_extraction(sys.modules[__name__], args.run, args.results, args.strict_quotes)

@@ -333,6 +333,36 @@ def summarize(policy, reviews):
             "score_truth_verified": False}
 
 
+def subjective_attribution(policy, reviews, dimension_ids, judge=None):
+    """Per-dimension rubric scores tied to the exact evaluator model(s) that produced them.
+
+    Average is reported only when more than one model scored the dimension; the judge is listed
+    for attribution but never enters the reviewer average.
+    """
+    models = {m["id"]: m for m in (policy or {}).get("selected_models", []) if isinstance(m, dict) and m.get("id")}
+    rows_all = [(r, "reviewer") for r in reviews]
+    if isinstance(judge, dict) and judge.get("status") == "completed":
+        rows_all.append((judge, "judge"))
+    result = {}
+    for dim in dimension_ids:
+        rows = []
+        for review, role in rows_all:
+            model = models.get(review.get("model_id"), {})
+            value = (review.get("scores") or {}).get(dim) if review.get("status") == "completed" else None
+            rows.append({"model_id": review.get("model_id"), "display_name": model.get("display_name") or review.get("model_id"),
+                         "provider": model.get("provider"), "api_model": model.get("api_model"), "role": role,
+                         "status": review.get("status"), "score": value})
+        numeric = [r["score"] for r in rows if r["role"] == "reviewer" and r["score"] is not None]
+        result[dim] = {
+            "rubric_models": rows,
+            "scored_models": len(numeric),
+            "average_score": round(statistics.mean(numeric), 3) if len(numeric) > 1 else None,
+            "average_scope": "reviewers_only_when_multiple_models",
+            "subjective": True,
+        }
+    return result
+
+
 def validate_vote(row):
     if any(not nonempty(row.get(k)) for k in ("vote_id", "reviewer_id", *TASK_IDENTITY)):
         raise ValueError("Each vote requires identity, criteria, input and as_of bindings")

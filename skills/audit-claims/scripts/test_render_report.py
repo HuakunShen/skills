@@ -8,6 +8,7 @@ from html.parser import HTMLParser
 import io
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -78,8 +79,11 @@ class RenderReportTests(unittest.TestCase):
         self.assertIn(html.escape(payload, quote=True), page)
         parsed = Tags()
         parsed.feed(page)
-        self.assertFalse({'script', 'img', 'iframe', 'object', 'embed', 'foreignobject'} &
+        self.assertFalse({'img', 'iframe', 'object', 'embed', 'foreignobject'} &
                          {tag for tag, _ in parsed.elements})
+        # Only the bundled, static explorer script may appear; payload text must never become script.
+        self.assertEqual([tag for tag, _ in parsed.elements].count('script'), 1)
+        self.assertNotIn('alert("X")', page)
         self.assertFalse(any(name.lower().startswith('on') for _, attrs in parsed.elements for name in attrs))
         radar = renderer.render_radar(data)
         root = ET.fromstring(radar)
@@ -512,6 +516,91 @@ class SourcingRigorRenderTests(unittest.TestCase):
         html_en = renderer.objective_metrics({'metrics': m}, lang='en')
         self.assertIn('出处与可查证度', html_zh)
         self.assertIn('Sourcing Rigor', html_en)
+
+
+class CredibilityDashboardRenderTests(unittest.TestCase):
+    def setUp(self):
+        self.data = renderer.load_json(ROOT / 'assets/report-sample.json')
+
+    def full_metrics(self):
+        import score_claims as scoring
+        import test_score_claims as fixtures
+        rows = [
+            fixtures.claim('f1', claim_type='factual', outcome='supported', citation_status='primary_cited'),
+            fixtures.claim('f2', claim_type='factual', outcome='contradicted', citation_status='uncited_specific'),
+            fixtures.claim('f3', claim_type='factual', outcome='mixed', citation_status='secondary_cited'),
+            fixtures.claim('p1', first_stated_at='2025-01-01', difficulty='trivial', outcome='supported'),
+            fixtures.claim('p2', first_stated_at='2025-01-01', difficulty='hard', outcome='contradicted',
+                           certainty_text='我一定会做到'),
+        ]
+        return scoring.calculate(rows, copy.deepcopy(fixtures.COVERAGE))
+
+    def test_kpi_cards_and_tables_carry_traffic_lights_for_credibility_and_forecasts(self):
+        m = self.full_metrics()
+        zh = renderer.objective_metrics({'metrics': m}, lang='zh')
+        en = renderer.objective_metrics({'metrics': m}, lang='en')
+        for page in (zh, en):
+            self.assertRegex(page, r'class="tl tl-(green|yellow|red)"')
+            self.assertIn('tl-red', page)
+            self.assertIn('badge negative', page)
+        self.assertIn('事实诚信分', zh)
+        self.assertIn('无据传谣率', zh)
+        self.assertIn('难度加权预测分', zh)
+        self.assertIn('高确信度差距', zh)
+        self.assertIn('Misinformation rate', en)
+        self.assertIn('Difficulty-adjusted score', en)
+        self.assertIsNone(re.search(r'[\u3400-\u9fff]', en))
+        self.assertIn('客观事实核查', zh)
+        self.assertIn('evidence-backed', en)
+
+    def test_rate_badges_map_error_rates_inverted(self):
+        self.assertIn('badge ok', renderer.rate_badge({'value': 0.02, 'numerator': 1, 'denominator': 50}, renderer.I18N['en'], error_rate=True))
+        self.assertIn('badge negative', renderer.rate_badge({'value': 0.5, 'numerator': 5, 'denominator': 10}, renderer.I18N['en'], error_rate=True))
+        self.assertIn('badge muted', renderer.rate_badge(None, renderer.I18N['en']))
+
+    def test_legacy_metrics_without_new_fields_explain_recompute_instead_of_zeroes(self):
+        legacy = {k: v for k, v in self.data['metrics'].items() if k not in {'factual_credibility', 'difficulty_adjusted'}}
+        page = renderer.objective_metrics({'metrics': legacy}, lang='en')
+        self.assertIn('predates factual credibility', page)
+        self.assertNotIn('Factual honesty score', page)
+
+    def test_subjective_ratings_name_every_scoring_model_with_provider_and_average_note(self):
+        page = renderer.render_report(self.data, lang='en')
+        self.assertIn('Subjective rating', page)
+        self.assertIn('Scoring models', page)
+        for model in self.data['panel']['policy']['selected_models']:
+            if any(r['model_id'] == model['id'] and r['status'] == 'completed' for r in self.data['panel']['reviews']):
+                self.assertIn(model['display_name'], page)
+                self.assertIn(model['api_model'], page)
+        completed = [r for r in self.data['panel']['reviews'] if r['status'] == 'completed']
+        expected_note = 'Per-dimension average shown' if len(completed) > 1 else 'Single model scored'
+        self.assertIn(expected_note, page)
+
+    def test_all_claims_explorer_is_offline_filterable_and_cards_stay_notable_only(self):
+        data = copy.deepcopy(self.data)
+        data['cases'].append(copy.deepcopy(data['cases'][0]))
+        data['cases'][-1].update({'id': 'clm_quiet_filler', 'claim': 'Quiet filler claim text', 'notable': False,
+                                  'status': 'pending', 'citation_status': 'uncited_vague'})
+        page = renderer.render_report(data, lang='en')
+        self.assertIn('id="explorer"', page)
+        self.assertEqual(page.count('<tr data-status='), len(data['cases']))
+        self.assertIn('data-unsub="1"', page)
+        self.assertIn('data-filter="unsubstantiated"', page)
+        self.assertIn('Quiet filler claim text', page)
+        notable_cards = sum(1 for case in data['cases'] if case.get('notable', True))
+        self.assertEqual(page.count('class="card case '), notable_cards)
+        parsed = Tags()
+        parsed.feed(page)
+        self.assertEqual([tag for tag, _ in parsed.elements].count('script'), 1)
+        self.assertIn('data-template="Showing {n} of {total}"', page)
+        self.assertNotIn('<script>alert', page)
+
+    def test_explorer_is_absent_from_longitudinal_view_and_empty_without_cases(self):
+        data = copy.deepcopy(self.data)
+        self.assertNotIn('id="explorer"', renderer.render_report(data, view='longitudinal', lang='en'))
+        data['cases'] = []
+        self.assertEqual(renderer.render_explorer(data, renderer.I18N['en']), '')
+
 
 if __name__ == '__main__':
     unittest.main()

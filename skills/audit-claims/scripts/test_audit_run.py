@@ -492,7 +492,11 @@ class AuditRunTests(unittest.TestCase):
         self.assertEqual(hashes['rubric_hash'], built['rubric_hash'])
         report_data = audit.read_json(self.run / 'reports/report-data.json')
         by_cid = {c['id']: c for c in report_data['cases']}
-        self.assertEqual(set(by_cid), {'clm_resolved_late', 'clm_pending_unmet', 'clm_hyp_late'})
+        # Dashboard ships every canonical claim (fillers included); only notable ones get narrative cards.
+        self.assertEqual(len(by_cid), len(claims))
+        self.assertTrue({'clm_resolved_late', 'clm_pending_unmet', 'clm_hyp_late'} <= set(by_cid))
+        self.assertTrue(by_cid['clm_resolved_late']['notable'])
+        self.assertFalse(by_cid['clm_filler_00']['notable'])
         self.assertEqual(by_cid['clm_resolved_late']['assessment'], 'Verified directly against primary data at index 23.')
         self.assertEqual(by_cid['clm_resolved_late']['original_quote'], 'Exact late quote from video.')
         self.assertIn('01:13–01:21', by_cid['clm_resolved_late']['timestamps'])
@@ -500,6 +504,12 @@ class AuditRunTests(unittest.TestCase):
         self.assertIn('UNRATE == 4.3%', by_cid['clm_pending_unmet']['assessment'])
         self.assertEqual(by_cid['clm_hyp_late']['status'], 'not_checked')
         self.assertEqual(by_cid['clm_hyp_late']['evidence_ids'], ['s1'])
+        self.assertEqual(by_cid['clm_resolved_late']['verdict'], 'supported')
+        self.assertIn('citation_status', by_cid['clm_resolved_late'])
+        self.assertIn('evidence_urls', by_cid['clm_resolved_late'])
+        # No panel run yet: rubric attribution is null, difficulty attribution is still labelled subjective.
+        self.assertIsNone(report_data['subjective_attribution']['rubric'])
+        self.assertTrue(report_data['subjective_attribution']['difficulty']['subjective'])
 
     def test_same_day_as_of_clamped_to_wall_clock_time_across_timezones(self):
         from datetime import timezone, timedelta
@@ -585,11 +595,16 @@ class AuditRunTests(unittest.TestCase):
                                   'resolution_basis': 'explicit'})
         frozen = pipeline.freeze_criteria(audit, self.run, 'c_future', ok_def,
                                           difficulty='hard', difficulty_score=4,
-                                          difficulty_rationale='Above consensus price target.')
+                                          difficulty_rationale='Above consensus price target.',
+                                          difficulty_model_id='model-a')
         self.assertEqual(frozen['lead_time_days'], 120.0)
         updated = {c['claim_id']: c for c in audit.read_jsonl(self.run / 'claims.jsonl')}
         self.assertEqual(updated['c_future']['difficulty'], 'hard')
         self.assertEqual(updated['c_future']['difficulty_score'], 4)
+        # Subjective difficulty rating is attributed to the model that assigned it.
+        self.assertEqual(updated['c_future']['difficulty_model_id'], 'model-a')
+        with self.assertRaises(ValueError):
+            pipeline.freeze_criteria(audit, self.run, 'c_future', ok_def, difficulty_model_id='   ')
         # Hand-tampered frozen retroactive prediction fails audit.validate hard.
         updated['c_retro']['criteria'] = {'definition': {'target': 't', 'predicate': 'p', 'window_start': '2025-09-01',
                                                          'window_end': '2025-09-30', 'timezone': 'UTC',

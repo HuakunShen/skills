@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 import _common as common
 import model_panel as panel
+import score_claims as scoring
 
 ROOT = Path(__file__).resolve().parent.parent
 THEME = {
@@ -69,7 +70,46 @@ I18N = {
         "static_note": "静态报告 · 可离线阅读",
         "nav_title": "报告目录",
         "side_note": "事实核验与表达评价分开。<br>保留原话、分歧与未知。",
-        "nav": [("overview", "报告总览"), ("model-panel", "表达评价"), ("longitudinal", "跨期观点"), ("cases", "核验案例"), ("coverage", "覆盖与成本"), ("sources", "材料与引用")],
+        "nav": [("overview", "报告总览"), ("model-panel", "表达评价"), ("longitudinal", "跨期观点"), ("cases", "核验案例"), ("explorer", "全部主张"), ("coverage", "覆盖与成本"), ("sources", "材料与引用")],
+        "objective_badge": "客观事实核查 · 证据支撑",
+        "subjective_badge": "主观评分 · 归属模型",
+        "fact_group": "事实可信度（客观核查）",
+        "fact_group_note": "仅统计已采纳裁决的事实型主张，不含预测",
+        "pred_group": "预测准确率与难度加权（客观核查 + 事前难度）",
+        "pred_group_note": "难度与提前量加权仅作用于已裁决预测；难度为事前主观评级",
+        "factual_honesty": "事实诚信分",
+        "factual_honesty_note": "证伪扣分重，无据证伪扣分更重；部分支持（混淆）扣分较轻",
+        "contradiction_rate": "证伪率",
+        "contradiction_note": "已证伪 / 事实型已裁决",
+        "misinfo_rate": "无据传谣率",
+        "misinfo_note": "证伪且无出处 / 事实型已裁决",
+        "diff_adj_score": "难度加权预测分",
+        "diff_adj_note": "权重 trivial 0.5 · moderate 1 · hard 2 · non-consensus 3",
+        "lead_weighted": "提前量加权支持率",
+        "lead_weighted_note": "权重 log2(1 + 提前天数/30)",
+        "dated_unit": "条带期限预测",
+        "overconfidence": "高确信度差距",
+        "overconfidence_note": "整体支持率减去高确信度支持率；正值表示高确信度表述更不准",
+        "credibility_legacy": "本次 metrics.json 不含事实可信度或难度加权字段（旧版运行）；用当前脚本重算后即可显示。",
+        "tl_green": "绿灯", "tl_yellow": "黄灯", "tl_red": "红灯",
+        "traffic_legend": "交通灯：正向指标 绿 ≥80% · 黄 60–79.9% · 红 <60%；错误率 绿 <5% · 黄 5–15% · 红 >15%",
+        "subjective_models": "评分模型",
+        "subjective_avg_multi": "多模型时每维显示平均值（见“平均”列）",
+        "subjective_avg_single": "仅一个模型评分，无跨模型平均",
+        "subjective_judge": "裁判",
+        "subjective_unrecorded": "未记录评级模型",
+        "difficulty_raters": "难度评级模型",
+        "list_sep": "、",
+        "explorer_title": "全部主张检索",
+        "explorer_desc": "包含待结算、未核验、证伪与部分支持的全部主张；可离线搜索并按结论或无据情况筛选。",
+        "explorer_search": "搜索主张、原话、理由或编号…",
+        "explorer_all": "全部",
+        "explorer_unsub": "无据主张",
+        "explorer_count": "显示 {n} / {total} 条",
+        "explorer_empty": "没有匹配的主张",
+        "explorer_details": "原话与判定理由",
+        "th_claim": "主张", "th_verdict": "结论", "th_lifecycle": "阶段", "th_citation": "出处", "th_lead": "提前量",
+        "lifecycle_labels": {"pending": "待结算", "ready": "待核验", "awaiting_evidence": "待证据", "resolved": "已结算", "unscorable": "不可核验", "disputed": "有争议"},
         "nav_long": [("overview", "报告总览"), ("longitudinal", "观点时间线"), ("model-panel", "表达评价"), ("coverage", "范围与限制"), ("sources", "材料与引用")],
         "status": {"supported": "支持", "contradicted": "证据反驳", "mixed": "部分支持", "pending": "待结算", "indeterminate": "无法判定", "not_checked": "未核验"},
         "relations": {"continuity": "持续主张", "genuine_change": "立场更新", "not_comparable": "不可直接比较", "contradiction": "存在冲突", "unclear": "解释不足"},
@@ -199,7 +239,46 @@ I18N = {
         "static_note": "Static report · Offline readable",
         "nav_title": "REPORT CONTENTS",
         "side_note": "Fact checks and expression quality are separate.<br>Quotes, dissent, and unknowns preserved.",
-        "nav": [("overview", "Overview"), ("model-panel", "Expression"), ("longitudinal", "Longitudinal"), ("cases", "Cases"), ("coverage", "Coverage & Cost"), ("sources", "Sources")],
+        "nav": [("overview", "Overview"), ("model-panel", "Expression"), ("longitudinal", "Longitudinal"), ("cases", "Cases"), ("explorer", "All Claims"), ("coverage", "Coverage & Cost"), ("sources", "Sources")],
+        "objective_badge": "Objective fact-check · evidence-backed",
+        "subjective_badge": "Subjective rating · model-attributed",
+        "fact_group": "Factual credibility (objective check)",
+        "fact_group_note": "Adjudicated factual claims only; predictions excluded",
+        "pred_group": "Forecast accuracy & difficulty weighting (objective check + ex-ante difficulty)",
+        "pred_group_note": "Difficulty and lead-time weights apply to adjudicated predictions; difficulty is an ex-ante subjective rating",
+        "factual_honesty": "Factual honesty score",
+        "factual_honesty_note": "Contradictions cost points; uncited contradictions cost more; mixed verdicts (conflation) cost less",
+        "contradiction_rate": "Contradiction rate",
+        "contradiction_note": "contradicted / adjudicated factual",
+        "misinfo_rate": "Misinformation rate",
+        "misinfo_note": "contradicted with no citation / adjudicated factual",
+        "diff_adj_score": "Difficulty-adjusted score",
+        "diff_adj_note": "weights trivial 0.5 · moderate 1 · hard 2 · non-consensus 3",
+        "lead_weighted": "Lead-time weighted support",
+        "lead_weighted_note": "weight log2(1 + lead days / 30)",
+        "dated_unit": "dated predictions",
+        "overconfidence": "High-certainty gap",
+        "overconfidence_note": "overall support minus high-certainty support; positive means high-certainty wording is less accurate",
+        "credibility_legacy": "This metrics.json predates factual credibility and difficulty-weighted fields; recompute it with the current scripts to display them.",
+        "tl_green": "Green", "tl_yellow": "Amber", "tl_red": "Red",
+        "traffic_legend": "Traffic lights: higher-is-better green ≥80% · amber 60–79.9% · red <60%; error rates green <5% · amber 5–15% · red >15%",
+        "subjective_models": "Scoring models",
+        "subjective_avg_multi": "Per-dimension average shown when several models scored (see Mean column)",
+        "subjective_avg_single": "Single model scored; no cross-model average",
+        "subjective_judge": "Judge",
+        "subjective_unrecorded": "rater not recorded",
+        "difficulty_raters": "Difficulty raters",
+        "list_sep": ", ",
+        "explorer_title": "All claims explorer",
+        "explorer_desc": "Every claim, including pending, unchecked, contradicted and mixed ones; search offline and filter by verdict or unsubstantiated status.",
+        "explorer_search": "Search claim, quote, rationale or ID…",
+        "explorer_all": "All",
+        "explorer_unsub": "Unsubstantiated",
+        "explorer_count": "Showing {n} of {total}",
+        "explorer_empty": "No matching claims",
+        "explorer_details": "Quote & rationale",
+        "th_claim": "Claim", "th_verdict": "Verdict", "th_lifecycle": "Stage", "th_citation": "Sourcing", "th_lead": "Lead time",
+        "lifecycle_labels": {"pending": "Pending", "ready": "Ready", "awaiting_evidence": "Awaiting evidence", "resolved": "Resolved", "unscorable": "Unscorable", "disputed": "Disputed"},
         "nav_long": [("overview", "Overview"), ("longitudinal", "Timeline"), ("model-panel", "Expression"), ("coverage", "Scope & Limits"), ("sources", "Sources")],
         "status": {"supported": "Supported", "contradicted": "Contradicted", "mixed": "Mixed", "pending": "Pending", "indeterminate": "Indeterminate", "not_checked": "Not checked"},
         "relations": {"continuity": "Continuity", "genuine_change": "Genuine update", "not_comparable": "Not comparable", "contradiction": "Conflict", "unclear": "Unclear"},
@@ -1576,6 +1655,31 @@ CSS = r'''
 :root{--emerald:#059669;--emerald-bg:#ECFDF5;--emerald-bd:#A7F3D0;--amber:#B45309;--amber-bg:#FFFBEB;--amber-bd:#FDE68A;--rose:#BE123C;--rose-bg:#FFF1F2;--rose-bd:#FECDD3;--sky:#0369A1;--sky-bg:#F0F9FF;--sky-bd:#BAE6FD;--indigo:#4F46E5;--indigo-bg:#EEF2FF;--indigo-bd:#C7D2FE;--violet:#6D28D9;--violet-bg:#F5F3FF;--violet-bd:#DDD6FE;--teal:#0F766E;--teal-bg:#F0FDFA;--teal-bd:#99F6E4}
 @media(prefers-color-scheme:dark){:root{--emerald:#34D399;--emerald-bg:#052E24;--emerald-bd:#065F46;--amber:#FBBF24;--amber-bg:#352004;--amber-bd:#92400E;--rose:#F87171;--rose-bg:#380D17;--rose-bd:#9F1239;--sky:#38BDF8;--sky-bg:#082F49;--sky-bd:#075985;--indigo:#818CF8;--indigo-bg:#1E1B4B;--indigo-bd:#3730A3;--violet:#A78BFA;--violet-bg:#2E1065;--violet-bd:#5B21B6;--teal:#2DD4BF;--teal-bg:#042F2E;--teal-bd:#115E59}}
 *{box-sizing:border-box}h1,h2,h3,.stance,.reason-meta,.metadata,.synthetic,.topic-index,.judge-label,.badge,.top-meta{overflow-wrap:anywhere;min-width:0}.legend-item{max-width:100%;overflow-wrap:anywhere}html{scroll-behavior:auto;scroll-padding-top:24px}body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font);font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:4px}p{margin:0 0 10px;overflow-wrap:anywhere}ul{padding-left:19px;margin:8px 0}li{margin:5px 0;overflow-wrap:anywhere}.shell{max-width:1280px;margin:0 auto;padding:24px 32px 56px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 0 20px;border-bottom:1px solid var(--border);margin-bottom:30px;font-size:12px;color:var(--muted)}.brand{display:flex;gap:10px;align-items:center;font-weight:700;color:var(--foreground);letter-spacing:.055em}.mark{display:grid;place-items:center;width:27px;height:27px;border:0;border-radius:7px;font-size:14px;color:#fff;background:linear-gradient(135deg,#4F46E5,#0D9488);box-shadow:0 2px 6px rgba(79,70,229,.28)}.top-meta{font-size:11px;text-align:right}.layout{display:grid;grid-template-columns:160px minmax(0,1fr);gap:32px}.sidebar{position:sticky;top:24px;align-self:start;font-size:12px}.nav-title{font-size:11px;letter-spacing:.10em;color:var(--muted);margin:0 0 12px;font-weight:650}.sidebar a{display:block;color:var(--muted);padding:8px 11px;margin:2px 0;border-radius:7px;transition:background .15s,color .15s}.sidebar a:hover{background:var(--subtle);color:var(--foreground);text-decoration:none}.sidebar a:first-of-type{color:var(--indigo);background:var(--indigo-bg);font-weight:650}.sidebar .side-note{margin:27px 10px 0;color:var(--muted);font-size:11px;line-height:1.8}.content{min-width:0}.eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--indigo);letter-spacing:.06em;margin-bottom:8px;padding:2px 8px;border-radius:999px;background:var(--indigo-bg);border:1px solid var(--indigo-bd)}h1{font-size:28px;line-height:1.35;letter-spacing:-.035em;margin:0 0 10px;font-weight:700}h2{font-size:18px;letter-spacing:-.02em;line-height:1.4;margin:0;font-weight:680}h3{font-size:14px;margin:0 0 4px;font-weight:650}.subtitle{font-size:13px;color:var(--muted);max-width:78ch}.metadata{display:flex;flex-wrap:wrap;gap:7px 14px;color:var(--muted);font-size:11px;margin:14px 0 23px;align-items:center}.badge{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;line-height:1.5;white-space:normal;color:var(--muted);background:var(--subtle)}.badge.accent{color:var(--indigo);background:var(--indigo-bg);border-color:var(--indigo-bd)}.badge.ok{color:var(--emerald);background:var(--emerald-bg);border-color:var(--emerald-bd)}.badge.negative{color:var(--rose);background:var(--rose-bg);border-color:var(--rose-bd)}.badge.warn{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-bd)}.badge.info{color:var(--sky);background:var(--sky-bg);border-color:var(--sky-bd)}.badge.violet{color:var(--violet);background:var(--violet-bg);border-color:var(--violet-bd)}@media(prefers-color-scheme:dark){.badge.negative{color:#F87171}}.synthetic{display:flex;gap:8px;align-items:baseline;padding:11px 14px;border:1px solid var(--amber-bd);background:var(--amber-bg);border-radius:var(--radius);margin:18px 0;font-size:11.5px;color:var(--amber)}.synthetic strong{color:var(--amber);font-weight:700}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.metric{min-width:0;border:1px solid var(--border);border-top:3px solid var(--indigo);border-radius:var(--radius);background:var(--surface);padding:16px 16px 14px;box-shadow:0 1px 2px rgba(15,23,42,.04)}.metric.metric-emerald{border-top-color:#10B981}.metric.metric-emerald .metric-value{color:var(--emerald)}.metric.metric-indigo{border-top-color:#4F46E5}.metric.metric-indigo .metric-value{color:var(--indigo)}.metric.metric-teal{border-top-color:#14B8A6}.metric.metric-teal .metric-value{color:var(--teal)}.metric.metric-violet{border-top-color:#8B5CF6}.metric.metric-violet .metric-value{color:var(--violet)}.metric-label{color:var(--muted);font-size:11px;font-weight:600}.metric-value{font-size:28px;font-weight:700;letter-spacing:-.04em;line-height:1.2;margin:8px 0;font-variant-numeric:tabular-nums}.metric-note{font-size:11px;color:var(--muted);line-height:1.55}.disclosures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:18px}.section{margin-top:30px;scroll-margin-top:24px}.section-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:13px}.section-description{font-size:11.5px;color:var(--muted);margin-top:4px}.card{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.04)}.card-header{padding:16px 20px 0}.card-header-sub{font-size:11.5px;color:var(--muted);margin-top:3px}.card-content{padding:16px 20px}.card-footer{border-top:1px solid var(--border);padding:12px 20px;font-size:11px;color:var(--muted);background:var(--subtle)}.viz-card{margin-bottom:18px}.viz-wrap{padding:14px 18px 16px}.viz-block{border-bottom:1px solid var(--border);padding:14px 18px 16px}.viz-block:last-child{border-bottom:0}.viz-subhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px}.viz-subhead h4{margin:0;font-size:13px;font-weight:650;color:var(--foreground)}.viz-subhead span{font-size:11px;color:var(--muted)}.viz-svg{display:block;width:100%;height:auto;max-width:740px;margin:0 auto}.viz-svg text{font-family:var(--font)}.viz-group-label{font-size:11px;font-weight:700;letter-spacing:.04em;fill:var(--indigo);text-transform:uppercase}.viz-divider{stroke:var(--border);stroke-width:1}.viz-row-label{font-size:12px;font-weight:600;fill:var(--foreground)}.viz-n-sub{font-size:10.5px;font-weight:500;fill:var(--muted)}.viz-track{fill:var(--subtle)}.viz-bar-pct{font-size:11px;font-weight:700;fill:#FFFFFF}.viz-stat-val{font-size:11.5px;font-weight:650;fill:var(--foreground);font-variant-numeric:tabular-nums}.viz-stat-sub{font-size:10.5px;font-weight:500;fill:var(--muted);font-variant-numeric:tabular-nums}.viz-legend-text{font-size:11px;fill:var(--muted);font-weight:550}.viz-grid{stroke:var(--border);stroke-width:1;stroke-dasharray:3 3}.viz-axis-base{stroke:var(--border);stroke-width:1.4}.viz-axis-tick{font-size:10.5px;fill:var(--muted);font-variant-numeric:tabular-nums}.viz-axis-title{font-size:10.5px;font-weight:650;fill:var(--muted)}.viz-axis-rate{fill:var(--indigo)}.viz-ref-line{stroke:var(--teal);stroke-width:1.6;stroke-dasharray:5 4}.viz-ref-pill rect{fill:var(--teal-bg);stroke:var(--teal-bd);stroke-width:1}.viz-ref-pill text{font-size:10px;font-weight:700;fill:var(--teal)}.viz-ci{stroke:var(--foreground);stroke-width:1.5;opacity:.65}.viz-bar-val{font-size:12px;font-weight:700;fill:var(--foreground);font-variant-numeric:tabular-nums}.viz-bar-sub{font-size:10.5px;fill:var(--muted);font-variant-numeric:tabular-nums}.viz-empty-bar{fill:var(--subtle);stroke:var(--border);stroke-width:1.2;stroke-dasharray:3 2}.viz-empty-track{stroke:var(--border);stroke-width:1.4;stroke-dasharray:4 3}.viz-x-label{font-size:12px;font-weight:650;fill:var(--foreground)}.viz-x-sub{font-size:10.5px;fill:var(--muted);font-variant-numeric:tabular-nums}.viz-trend-line{stroke:var(--indigo);stroke-width:2.2;stroke-dasharray:5 3}.viz-trend-dot{fill:var(--surface);stroke:var(--indigo);stroke-width:2.4}.viz-acc-line{stroke:var(--indigo);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}.viz-acc-dot{fill:var(--indigo);stroke:var(--surface);stroke-width:2}.viz-acc-pill-bg{fill:var(--indigo-bg);stroke:var(--indigo-bd);stroke-width:1}.viz-acc-pill-text{font-size:10.5px;font-weight:700;fill:var(--indigo);font-variant-numeric:tabular-nums}.viz-leg-med{stroke:var(--foreground)}.kpi-chips{display:flex;flex-wrap:wrap;gap:8px;padding:12px 20px 4px}.kpi-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;background:var(--subtle);border:1px solid var(--border);color:var(--foreground);font-variant-numeric:tabular-nums}.kpi-chip.chip-indigo{background:var(--indigo-bg);border-color:var(--indigo-bd);color:var(--indigo)}.kpi-chip.chip-emerald{background:var(--emerald-bg);border-color:var(--emerald-bd);color:var(--emerald)}.kpi-chip.chip-teal{background:var(--teal-bg);border-color:var(--teal-bd);color:var(--teal)}.chip-sky{background:var(--sky-bg);border-color:var(--sky-bd);color:var(--sky)}.chip-amber{background:var(--amber-bg);border-color:var(--amber-bd);color:var(--amber)}.chip-rose{background:var(--rose-bg);border-color:var(--rose-bd);color:var(--rose)}.chart-empty{padding:12px 14px;border:1px dashed var(--border);border-radius:8px;background:var(--subtle);color:var(--muted);font-size:12px;text-align:center}.summary{font-size:13px;line-height:1.9}.summary .summary-label{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--indigo);margin-bottom:9px}.radar-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(210px,1fr);align-items:center}.radar-wrap{padding:10px 0 0;min-width:0}.radar-wrap svg{display:block;width:100%;height:auto}.radar-note{padding:20px 22px 20px 4px;font-size:12px;color:var(--muted)}.legend{display:flex;gap:9px 17px;flex-wrap:wrap;font-size:11px;margin:5px 20px 17px;color:var(--muted)}.legend-item{display:flex;align-items:center;gap:7px}.legend-line{width:18px;border-top:2.5px solid;flex:0 0 auto;border-radius:2px}.legend-line.mean-line{height:3px;border-top:0;background:linear-gradient(90deg,#4F46E5,#7C3AED,#0D9488)}.mini-stat{border-top:1px solid var(--border);padding-top:12px;margin-top:14px}.mini-stat strong{display:block;font-size:20px;color:var(--indigo);font-weight:700;margin:3px 0;font-variant-numeric:tabular-nums}.table-wrap{overflow:auto;max-width:100%}table{border-collapse:collapse;width:100%;font-size:12px;min-width:650px}caption{text-align:left;color:var(--muted);padding:12px 20px 8px;font-size:11.5px;font-weight:550}th,td{border-bottom:1px solid var(--border);padding:11px 12px;text-align:right;vertical-align:top;font-variant-numeric:tabular-nums}th{font-weight:600;color:var(--muted);background:var(--subtle);font-size:11px}th:first-child,td:first-child{text-align:left;min-width:148px;padding-left:20px}th:last-child,td:last-child{padding-right:20px}tbody tr:last-child td{border-bottom:0}.mean-cell{font-weight:700;color:var(--indigo)}.dim-label{display:block;color:var(--foreground);font-weight:600}.n-note{color:var(--muted);font-size:11px;margin-top:2px}details{border-top:1px solid var(--border)}summary{cursor:pointer;padding:12px 20px;font-size:12px;font-weight:600;list-style-position:inside;overflow-wrap:anywhere}summary:hover{background:var(--subtle)}.reason-content{padding:0 20px 15px}.reason-row{padding:12px 0;border-top:1px solid var(--border);font-size:12px}.reason-row:first-child{border-top:0}.reason-meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;margin-bottom:5px}.citation{display:inline-flex;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;border:1px solid var(--indigo-bd);border-radius:5px;padding:0 6px;line-height:1.7;margin:2px 3px 2px 0;background:var(--indigo-bg);color:var(--indigo);white-space:nowrap}.judge{display:grid;grid-template-columns:110px minmax(0,1fr);gap:15px;padding:17px 20px;border-top:1px solid var(--border);background:var(--violet-bg)}.judge-label{font-size:11px;font-weight:700;color:var(--violet)}.judge-note{font-size:11px;color:var(--muted);margin-top:3px}.judge p{font-size:12px;margin:0 0 6px}.topic{margin-bottom:16px}.topic-header{display:flex;justify-content:space-between;gap:14px;padding:18px 20px;border-bottom:1px solid var(--border)}.topic-header p{font-size:11.5px;color:var(--muted);margin:5px 0 0;max-width:65ch}.topic-index{font-size:11px;color:var(--indigo);font-weight:600;font-variant-numeric:tabular-nums}.timeline{padding:6px 20px 12px}.entry{display:grid;grid-template-columns:90px minmax(0,1fr);gap:18px;padding:20px 0 0}.entry-date{font-size:11px;color:var(--muted);padding-top:2px;font-variant-numeric:tabular-nums}.entry-body{position:relative;border-left:2px solid var(--border);padding:0 0 20px 20px;min-width:0}.entry:last-child .entry-body{padding-bottom:4px}.entry-body:before{content:"";position:absolute;left:-6px;top:6px;width:10px;height:10px;border:2px solid var(--surface);border-radius:50%;background:var(--muted)}.entry-body.dot-ok:before{background:#10B981}.entry-body.dot-negative:before{background:#F43F5E}.entry-body.dot-warn:before{background:#F59E0B}.entry-body.dot-info:before{background:#0EA5E9}.entry-body.dot-violet:before{background:#8B5CF6}.entry-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.stance{font-size:12.5px;font-weight:650}.entry-claim{font-size:11.5px;color:var(--muted);margin:5px 0 10px}.quote{margin:0;padding:10px 12px;border:1px solid var(--border);border-left:3px solid var(--indigo);border-radius:6px;background:var(--subtle);font-size:12px;line-height:1.8;overflow-wrap:anywhere}.entry-context{font-size:11px;color:var(--muted);margin:8px 0 5px}.transition{padding:11px 0 0;font-size:11px;color:var(--muted);line-height:1.8}.transition .badge{margin:0 5px 4px 0}.topic-assessment{padding:12px 20px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted);background:var(--subtle)}.topic-assessment strong{color:var(--foreground);font-weight:600}.cases{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.case{padding:17px 18px;border-left:3px solid var(--border)}.case.case-ok{border-left-color:#10B981}.case.case-negative{border-left-color:#F43F5E}.case.case-warn{border-left-color:#F59E0B}.case.case-info{border-left-color:#0EA5E9}.case.case-violet{border-left-color:#8B5CF6}.case-top{display:flex;justify-content:space-between;gap:10px;margin-bottom:10px}.case p{font-size:12px}.case .case-claim{color:var(--muted);font-size:11.5px}.dual-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.key-values{margin:0}.kv{display:flex;justify-content:space-between;gap:18px;padding:10px 0;border-bottom:1px solid var(--border);font-size:12px}.kv:first-child{padding-top:0}.kv:last-child{border-bottom:0}.kv dt{color:var(--muted)}.kv dd{margin:0;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}.footnotes{font-size:11px;color:var(--muted);line-height:1.85}.sources{display:grid;grid-template-columns:1fr 1fr;gap:0 22px;padding:5px 20px}.source{padding:14px 0;border-bottom:1px solid var(--border);scroll-margin-top:24px;min-width:0}.source-title{font-size:12px;font-weight:600;margin:3px 0 5px;overflow-wrap:anywhere}.source-meta{font-size:11px;color:var(--muted);overflow-wrap:anywhere}.source-excerpt{font-size:11px;color:var(--muted);margin:7px 0 0;line-height:1.8}.footer{margin-top:30px;padding-top:15px;border-top:1px solid var(--border);color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:15px;flex-wrap:wrap}.hash{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.empty{padding:22px 20px;color:var(--muted);font-size:12px}.empty strong{display:block;color:var(--foreground);font-weight:600;margin-bottom:5px}.numeric{font-variant-numeric:tabular-nums}@media(max-width:1050px){.layout{grid-template-columns:124px minmax(0,1fr);gap:24px}.shell{padding:20px 24px 45px}.radar-layout{grid-template-columns:1fr}.radar-note{padding:5px 20px 18px}.mini-stat{display:inline-block;border:0;padding:0;margin:0 25px 0 0}.radar-note>p{margin-bottom:12px}.radar-wrap{max-width:660px;margin:auto;width:100%}}@media(max-width:760px){.radar-wrap .label{font-size:16px}.shell{padding:18px 16px 36px}.layout{display:block}.sidebar{position:static;margin-bottom:24px;display:flex;gap:4px;overflow:auto}.sidebar a{flex:0 0 auto;padding:7px 9px;font-size:11px}.sidebar .nav-title,.sidebar .side-note{display:none}.topbar{margin-bottom:16px;padding-bottom:14px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.disclosures{grid-template-columns:1fr}.metric{padding:14px}.metric-value{font-size:25px}h1{font-size:25px}.section{margin-top:24px}.card-content,.card-header,.viz-wrap,.viz-block{padding-left:14px;padding-right:14px}.kpi-chips{padding-left:14px;padding-right:14px}.radar-note{padding:5px 16px 18px}.cases,.dual-grid,.sources{grid-template-columns:1fr}.topic-header{padding:16px}.timeline{padding:0 16px 12px}.entry{grid-template-columns:63px minmax(0,1fr);gap:10px}.entry-body{padding-left:14px}.entry-top{display:block}.entry-top .badge{margin-top:6px}.quote{font-size:11px;padding:9px 10px}.judge{grid-template-columns:1fr;gap:8px;padding:15px 16px}.judge-label,.judge-note{display:inline}.judge-note{margin-left:8px}.synthetic{display:block}.sources{padding:2px 16px}.source:last-child{border:0}}@media print{body{background:#fff;color:#0f172a}.shell{max-width:none;padding:0}.layout{display:block}.sidebar{display:none}.card,.metric,.entry,.case{break-inside:avoid;box-shadow:none}.section{break-inside:auto}.table-wrap{overflow:visible}a{color:inherit}.topbar{margin-top:0}.footer{font-size:10px}}
+[hidden]{display:none !important}
+.tl{display:inline-block;flex:0 0 auto;width:.62em;height:.62em;border-radius:50%;margin-right:.45em;vertical-align:middle;background:var(--muted)}
+.tl-green{background:var(--emerald)}
+.tl-yellow{background:var(--amber)}
+.tl-red{background:var(--rose)}
+.metric.tl-green{border-top-color:var(--emerald)}
+.metric.tl-yellow{border-top-color:var(--amber)}
+.metric.tl-red{border-top-color:var(--rose)}
+.metric-neutral{border-top-color:var(--border)}
+.metric .metric-label{display:flex;align-items:center;min-width:0}
+.subhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:20px 0 10px}
+.subhead h3{margin:0;font-size:15px}
+.subhead span,.traffic-legend{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.attr-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:10px 0;font-size:13px;min-width:0;overflow-wrap:anywhere}
+.attr-block{margin:12px 0 14px;padding:10px 12px;border:1px dashed var(--violet-bd);border-radius:var(--radius);background:var(--violet-bg)}
+.attr-models{margin:6px 0 4px;padding-left:18px;font-size:13px;overflow-wrap:anywhere}
+.explorer-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;min-width:0}
+.explorer-controls input[type=search]{flex:1 1 240px;min-width:0;max-width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:inherit;font:inherit}
+.filter-group{display:flex;flex-wrap:wrap;gap:6px}
+.filter-group button{border:1px solid var(--border);border-radius:999px;padding:4px 11px;background:var(--subtle);color:var(--muted);font:inherit;font-size:12px;cursor:pointer}
+.filter-group button[aria-pressed=true]{color:var(--indigo);background:var(--indigo-bg);border-color:var(--indigo-bd)}
+.claim-cell{overflow-wrap:anywhere;min-width:0}
+.explorer-empty{color:var(--muted);text-align:center;padding:16px 0}
+.explorer table td details{margin-top:4px}
+
 '''
 
 
@@ -1592,6 +1696,174 @@ def _ci_text(ratio_obj):
     return f" · 95% Wilson [{ci['low']*100:.1f}%, {ci['high']*100:.1f}%]"
 
 
+TRAFFIC_TONE = {"green": "ok", "yellow": "warn", "red": "negative"}
+UNSUBSTANTIATED_CITATIONS = {"uncited_specific", "uncited_vague"}
+
+
+def light_dot(light, t):
+    if not light:
+        return ""
+    label = t["tl_" + light]
+    return f'<span class="tl tl-{light}" role="img" aria-label="{esc(label)}" title="{esc(label)}"></span>'
+
+
+def rate_badge(ratio_obj, t, *, error_rate=False):
+    light = scoring.traffic_light((ratio_obj or {}).get("value"), error_rate=error_rate)
+    return badge(percent(ratio_obj), TRAFFIC_TONE[light] if light else "muted")
+
+
+def _model_label(data, model_id):
+    models = ((data.get("panel") or {}).get("policy") or {}).get("selected_models") or []
+    model = next((m for m in models if m.get("id") == model_id), None) or {}
+    name = model.get("display_name") or model_id
+    return f'{name} · {model["api_model"]}' if model.get("api_model") else name
+
+
+def _rater_text(data, rated, t):
+    parts = [f'{t["subjective_unrecorded"] if mid == "unrecorded" else _model_label(data, mid)} ({n})' for mid, n in rated.items()]
+    return t["list_sep"].join(parts) if parts else t["not_provided"]
+
+
+def credibility_block(m, t):
+    fc, da = m.get("factual_credibility"), m.get("difficulty_adjusted")
+    if not fc and not da:
+        return f'<div class="card empty">{esc(t["credibility_legacy"])}</div>'
+    blocks = []
+    if fc:
+        honesty = (fc.get("factual_honesty_score") or {}).get("value")
+        honesty_light = scoring.traffic_light(honesty, scale=100)
+        contra, misinfo = fc.get("contradiction_rate") or {}, fc.get("misinformation_rate") or {}
+        cards = [
+            (t["factual_honesty"], "—" if honesty is None else f"{honesty:.1f}", f'/ 100 · {t["factual_honesty_note"]}', honesty_light),
+            (t["contradiction_rate"], percent(contra), f'{contra.get("numerator", 0)} / {contra.get("denominator", 0)} · {t["contradiction_note"]}', contra.get("traffic_light")),
+            (t["misinfo_rate"], percent(misinfo), f'{misinfo.get("numerator", 0)} / {misinfo.get("denominator", 0)} · {t["misinfo_note"]}', misinfo.get("traffic_light")),
+        ]
+        blocks.append((t["fact_group"], t["fact_group_note"], cards))
+    if da:
+        dscore = (da.get("difficulty_adjusted_score") or {}).get("value")
+        lead = da.get("lead_time_weighted_support_rate") or {}
+        gap = (da.get("overconfidence_gap") or {}).get("value")
+        cards = [
+            (t["diff_adj_score"], "—" if dscore is None else f"{dscore:.1f}", f'/ 100 · n = {da.get("weighted_n", 0)} · {t["diff_adj_note"]}', scoring.traffic_light(dscore, scale=100)),
+            (t["lead_weighted"], percent(lead), f'{lead.get("dated_n", 0)} {t["dated_unit"]} · {t["lead_weighted_note"]}', scoring.traffic_light(lead.get("value"))),
+            (t["overconfidence"], "—" if gap is None else f"{gap * 100:+.1f} pp", t["overconfidence_note"], None),
+        ]
+        blocks.append((t["pred_group"], t["pred_group_note"], cards))
+    html_out = ""
+    for title, note, cards in blocks:
+        tiles = "".join(
+            f'<div class="metric metric-neutral{" tl-" + light if light else ""}"><div class="metric-label">{light_dot(light, t)}{esc(label)}</div>'
+            f'<div class="metric-value">{esc(value)}</div><div class="metric-note">{esc(detail)}</div></div>'
+            for label, value, detail, light in cards
+        )
+        html_out += f'<div class="subhead"><h3>{esc(title)}</h3><span>{esc(note)}</span></div><div class="metrics">{tiles}</div>'
+    return html_out
+
+
+def subjective_attribution_html(data, prepared, t):
+    p = data["panel"]
+    dims = [d["id"] for d in prepared["rubric"]["dimensions"]]
+    attr = panel.subjective_attribution(p["policy"], p["reviews"], dims, judge=p.get("judge"))
+    rows = next(iter(attr.values()))["rubric_models"] if attr else []
+    items = []
+    for row in rows:
+        role = f' · {t["subjective_judge"]}' if row["role"] == "judge" else ""
+        status = "" if row["status"] == "completed" else f' · {row["status"]}'
+        identity = f'{row["display_name"]} · {row["provider"]}/{row["api_model"]}' if row.get("api_model") else row["display_name"]
+        items.append(f'<li>{esc(identity)}{esc(role)}{esc(status)}</li>')
+    multi = any(v["average_score"] is not None for v in attr.values())
+    note = t["subjective_avg_multi"] if multi else t["subjective_avg_single"]
+    return (f'<div class="attr-block"><div class="attr-row">{badge(t["subjective_badge"], "violet")}<strong>{esc(t["subjective_models"])}</strong></div>'
+            f'<ul class="attr-models">{"".join(items)}</ul><p class="source-meta">{esc(note)}</p></div>')
+
+
+def render_explorer(data, t):
+    cases = data.get("cases") or []
+    if not cases:
+        return ""
+    rows = []
+    for case in cases:
+        st_key = case.get("status", "not_checked")
+        citation = case.get("citation_status")
+        unsub = "1" if citation in UNSUBSTANTIATED_CITATIONS else "0"
+        search = " ".join(str(x) for x in (case.get("id"), case.get("claim"), case.get("original_quote"),
+                                            case.get("assessment"), case.get("difficulty_rationale"), case.get("speaker")) if x)
+        diff = case.get("difficulty")
+        lead = f'{case["lead_time_days"]:g}d' if case.get("lead_time_days") is not None else "—"
+        quote = f'<blockquote class="quote">“{esc(case["original_quote"])}”</blockquote>' if isinstance(case.get("original_quote"), str) and case["original_quote"].strip() else ""
+        rows.append(
+            f'<tr data-status="{esc(st_key)}" data-unsub="{unsub}" data-search="{esc(search.lower())}">'
+            f'<td class="hash">{esc(case["id"])}</td>'
+            f'<td><div class="claim-cell">{esc(case["claim"])}</div>'
+            f'<details><summary>{esc(t["explorer_details"])}</summary>{quote}<p>{esc(case.get("assessment") or "")}</p>'
+            f'{citation_links(data, case.get("evidence_ids") or [])}</details></td>'
+            f'<td>{badge(t["status"].get(st_key, st_key), STATUS_TONES.get(st_key, "muted"))}</td>'
+            f'<td>{esc(t["lifecycle_labels"].get(case.get("lifecycle"), case.get("lifecycle") or "—"))}</td>'
+            f'<td>{esc(t["difficulty_tiers"].get(diff, diff) if diff else "—")}</td>'
+            f'<td>{esc(t["sourcing_cats"].get(citation or "untagged", "—"))}</td>'
+            f'<td>{esc(lead)}</td></tr>'
+        )
+    filters = [("all", t["explorer_all"]), ("contradicted", t["status"]["contradicted"]), ("mixed", t["status"]["mixed"]),
+               ("supported", t["status"]["supported"]), ("pending", t["status"]["pending"]), ("unsubstantiated", t["explorer_unsub"])]
+    buttons = "".join(
+        f'<button type="button" data-filter="{key}" aria-pressed="{"true" if key == "all" else "false"}">{esc(label)}</button>'
+        for key, label in filters
+    )
+    return (
+        f'<section id="explorer" class="section"><div class="section-heading"><div><h2>{esc(t["explorer_title"])}</h2>'
+        f'<p class="section-description">{esc(t["explorer_desc"])}</p></div></div>'
+        f'<div class="card explorer" data-template="{esc(t["explorer_count"])}">'
+        f'<div class="explorer-controls"><input type="search" aria-label="{esc(t["explorer_search"])}" placeholder="{esc(t["explorer_search"])}">'
+        f'<div class="filter-group">{buttons}</div></div>'
+        f'<p class="source-meta" data-count>{esc(t["explorer_count"].format(n=len(rows), total=len(rows)))}</p>'
+        f'<div class="table-wrap"><table><thead><tr><th scope="col">ID</th><th scope="col">{esc(t["th_claim"])}</th>'
+        f'<th scope="col">{esc(t["th_verdict"])}</th><th scope="col">{esc(t["th_lifecycle"])}</th>'
+        f'<th scope="col">{esc(t["th_tier"])}</th><th scope="col">{esc(t["th_citation"])}</th>'
+        f'<th scope="col">{esc(t["th_lead"])}</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+        f'<p class="explorer-empty" data-empty hidden>{esc(t["explorer_empty"])}</p></div>{EXPLORER_JS}</section>'
+    )
+
+
+EXPLORER_JS = """<script>
+(function () {
+  var box = document.getElementById("explorer").querySelector(".explorer");
+  var search = box.querySelector("input[type=search]");
+  var buttons = box.querySelectorAll("[data-filter]");
+  var rows = box.querySelectorAll("tbody tr");
+  var count = box.querySelector("[data-count]");
+  var empty = box.querySelector("[data-empty]");
+  var active = "all";
+  function matches(row) {
+    var pass = active === "all" || (active === "unsubstantiated"
+      ? row.getAttribute("data-unsub") === "1" : row.getAttribute("data-status") === active);
+    var q = search.value.trim().toLowerCase();
+    return pass && (!q || row.getAttribute("data-search").indexOf(q) !== -1);
+  }
+  function apply() {
+    var shown = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var on = matches(rows[i]);
+      rows[i].hidden = !on;
+      if (on) shown++;
+    }
+    count.textContent = box.getAttribute("data-template").replace("{n}", shown).replace("{total}", rows.length);
+    empty.hidden = shown !== 0;
+  }
+  search.addEventListener("input", apply);
+  for (var b = 0; b < buttons.length; b++) {
+    buttons[b].addEventListener("click", function (event) {
+      active = event.currentTarget.getAttribute("data-filter");
+      for (var k = 0; k < buttons.length; k++) {
+        buttons[k].setAttribute("aria-pressed", buttons[k] === event.currentTarget ? "true" : "false");
+      }
+      apply();
+    });
+  }
+  apply();
+})();
+</script>"""
+
+
 def objective_metrics(data, lang="zh"):
     t = I18N[lang]
     m = data.get("metrics")
@@ -1605,14 +1877,16 @@ def objective_metrics(data, lang="zh"):
     ):
         r = m.get(key)
         detail = f'{r["numerator"]} / {r["denominator"]}{_ci_text(r)} · {note}' if r else t["not_provided"]
-        cards.append((label, percent(r), detail, tone_cls))
+        cards.append((label, percent(r), detail, tone_cls, scoring.traffic_light(r.get("value")) if r else None))
     b = m.get("brier")
     b_note = f'n = {b["n"]}{" (BSS=" + fmt(b.get("brier_skill_score"), 3) + ")" if b.get("brier_skill_score") is not None else ""} · {t["brier_note"]}' if b else t["not_provided"]
-    cards.append((t["brier_label"], fmt(b.get("value"), 3) if b else "—", b_note, "metric-violet"))
-    html_out = '<div class="metrics">' + "".join(
-        f'<div class="metric {tone_cls}"><div class="metric-label">{esc(label)}</div><div class="metric-value">{esc(value)}</div><div class="metric-note">{esc(note)}</div></div>'
-        for label, value, note, tone_cls in cards
+    cards.append((t["brier_label"], fmt(b.get("value"), 3) if b else "—", b_note, "metric-violet", None))
+    html_out = f'<div class="attr-row">{badge(t["objective_badge"], "ok")}<span class="traffic-legend">{esc(t["traffic_legend"])}</span></div>'
+    html_out += '<div class="metrics">' + "".join(
+        f'<div class="metric {tone_cls}{" tl-" + light if light else ""}"><div class="metric-label">{light_dot(light, t)}{esc(label)}</div><div class="metric-value">{esc(value)}</div><div class="metric-note">{esc(note)}</div></div>'
+        for label, value, note, tone_cls, light in cards
     ) + '</div>'
+    html_out += credibility_block(m, t)
 
     # Mandatory methodology disclosures: prediction vs factual split, S/C/M, lifecycle, evidence quality, domains.
     disclosures = []
@@ -1664,7 +1938,7 @@ def objective_metrics(data, lang="zh"):
     by_domain = m.get("by_domain") or {}
     if len(by_domain) > 1:
         d_rows = "".join(
-            f'<tr><td>{esc(dom)}</td><td>{esc(percent(sub.get("strict_support_rate")))}</td>'
+            f'<tr><td>{esc(dom)}</td><td>{rate_badge(sub.get("strict_support_rate"), t)}</td>'
             f'<td>{(sub.get("strict_support_rate") or {}).get("numerator",0)}/{(sub.get("strict_support_rate") or {}).get("denominator",0)}</td>'
             f'<td>{esc(percent(sub.get("accountability")))}</td></tr>'
             for dom, sub in by_domain.items()
@@ -1686,16 +1960,18 @@ def objective_metrics(data, lang="zh"):
             mean_s = fmt(sub.get("mean_difficulty_score"), 2) if sub.get("mean_difficulty_score") is not None else "—"
             diff_rows.append(
                 f'<tr><td>{esc(tier_label)}</td><td>{sub.get("total_canonical_claims", 0)}</td>'
-                f'<td>{esc(percent(sr))}</td><td>{sr.get("numerator", 0)}/{sr.get("denominator", 0)}</td>'
+                f'<td>{rate_badge(sr, t)}</td><td>{sr.get("numerator", 0)}/{sr.get("denominator", 0)}</td>'
                 f'<td>{esc(mean_s)}</td></tr>'
             )
         diff_svg = render_difficulty_accuracy_svg(m, lang=lang)
+        attr_line = (f'<div class="attr-row">{badge(t["subjective_badge"], "violet")}<span>{esc(t["difficulty_raters"])}: '
+                     f'{esc(_rater_text(data, pdiff.get("rated_by_model_id") or {}, t))}</span></div>')
         if diff_rows:
             chart_part = f'<div class="viz-block">{diff_svg}</div>' if diff_svg else ""
             html_out += (
                 f'<div class="card viz-card"><div class="card-header"><h3>{esc(t["diff_chart_title"])}</h3>'
                 f'<div class="card-header-sub">{esc(t["diff_chart_desc"])}</div></div>'
-                f'{chart_part}<div class="table-wrap"><table>'
+                f'{attr_line}{chart_part}<div class="table-wrap"><table>'
                 f'<caption>{esc(t["difficulty_title"])} · {esc(nt_caption)}</caption>'
                 f'<thead><tr><th>{esc(t["th_tier"])}</th><th>{esc(t["th_claims"])}</th>'
                 f'<th>{esc(t["strict_support"])}</th><th>S/N</th><th>{esc(t["th_mean_score"])}</th></tr></thead>'
@@ -1726,7 +2002,7 @@ def objective_metrics(data, lang="zh"):
             avg_d = f'{bdata["mean_lead_time_days"]:.1f}d' if bdata.get("mean_lead_time_days") is not None else "—"
             h_rows.append(
                 f'<tr><td>{esc(blabel)}</td><td>{bdata["count"]}</td>'
-                f'<td>{esc(percent(sr))}</td><td>{sr.get("numerator", 0)}/{sr.get("denominator", 0)}</td>'
+                f'<td>{rate_badge(sr, t)}</td><td>{sr.get("numerator", 0)}/{sr.get("denominator", 0)}</td>'
                 f'<td>{esc(avg_d)}</td></tr>'
             )
         hist_svg = render_horizon_histogram_svg(phor, lang=lang)
@@ -1773,7 +2049,7 @@ def render_panel(data, prepared, theme, lang="zh", expand_details=False):
     high_disagreement = max(((key, value) for key, value in stats["metrics"].items() if value["sd"] is not None), key=lambda pair: pair[1]["sd"], default=(None, {}))
     label_map = {d["id"]: dim_label(d, lang) for d in dims}
     missing_axes = sum(stats["metrics"].get(k, {}).get("n", 0) < len(stats["planned_models"]) for k in [d["id"] for d in dims])
-    body = f'<div class="card"><div class="radar-layout"><div class="radar-wrap">{render_radar(data,theme,prepared["rubric"],lang=lang)}</div><div class="radar-note"><h3>{esc(t["panel_note_h"])}</h3><p>{esc(t["panel_note_p"])}</p><div class="mini-stat"><span>{esc(t["panel_completed"])}</span><strong>{len(completed)} <span style="font-size:12px;font-weight:400">/ {len(stats["planned_models"])} {esc(t["panel_models_unit"])}</span></strong></div><div class="mini-stat"><span>{esc(t["panel_max_sd"])}</span><strong style="font-size:14px">{esc(label_map.get(high_disagreement[0], t["panel_insufficient"]))}</strong><span>SD {fmt(high_disagreement[1].get("sd"))}</span></div><p style="margin-top:15px">{esc(t["panel_missing_note"].format(n=missing_axes))}</p></div></div><div class="legend">{legends}<span class="legend-item"><i class="legend-line mean-line"></i>{esc(t["mean_legend"])}</span></div><div class="table-wrap"><table><caption>{esc(t["table_caption"])}</caption><thead><tr><th scope="col">{esc(t["th_dim"])}</th>{heads}<th scope="col">{esc(t["th_mean"])}</th><th scope="col">{esc(t["th_var"])}</th><th scope="col">{esc(t["th_sd"])}</th><th scope="col">{esc(t["th_range"])}</th><th scope="col">{esc(t["th_judge"])}</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="card-footer">{esc(t["panel_footer"])}</div>'
+    body = f'<div class="card"><div class="radar-layout"><div class="radar-wrap">{render_radar(data,theme,prepared["rubric"],lang=lang)}</div><div class="radar-note"><h3>{esc(t["panel_note_h"])}</h3><p>{esc(t["panel_note_p"])}</p><div class="mini-stat"><span>{esc(t["panel_completed"])}</span><strong>{len(completed)} <span style="font-size:12px;font-weight:400">/ {len(stats["planned_models"])} {esc(t["panel_models_unit"])}</span></strong></div><div class="mini-stat"><span>{esc(t["panel_max_sd"])}</span><strong style="font-size:14px">{esc(label_map.get(high_disagreement[0], t["panel_insufficient"]))}</strong><span>SD {fmt(high_disagreement[1].get("sd"))}</span></div><p style="margin-top:15px">{esc(t["panel_missing_note"].format(n=missing_axes))}</p></div></div><div class="legend">{legends}<span class="legend-item"><i class="legend-line mean-line"></i>{esc(t["mean_legend"])}</span></div>{subjective_attribution_html(data, prepared, t)}<div class="table-wrap"><table><caption>{esc(t["table_caption"])}</caption><thead><tr><th scope="col">{esc(t["th_dim"])}</th>{heads}<th scope="col">{esc(t["th_mean"])}</th><th scope="col">{esc(t["th_var"])}</th><th scope="col">{esc(t["th_sd"])}</th><th scope="col">{esc(t["th_range"])}</th><th scope="col">{esc(t["th_judge"])}</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="card-footer">{esc(t["panel_footer"])}</div>'
     open_attr = " open" if expand_details else ""
     for dim in dims:
         key = dim["id"]
@@ -1838,6 +2114,8 @@ def render_report(data, view="full", theme=None, rubric=None, lang="zh", expand_
     diff_badge_tones = {"trivial": "ok", "moderate": "info", "hard": "warn", "non_consensus": "violet"}
     cases = []
     for case in data.get("cases") or []:
+        if not case.get("notable", True):
+            continue
         st_key = case.get("status", "not_checked")
         status, tone = t["status"][st_key], STATUS_TONES[st_key]
         quote_html = f'<blockquote class="quote">“{esc(case["original_quote"])}”</blockquote>' if isinstance(case.get("original_quote"), str) and case["original_quote"].strip() else ""
@@ -1882,9 +2160,10 @@ def render_report(data, view="full", theme=None, rubric=None, lang="zh", expand_
         sources.append(f'<article class="source" id="source-{i}"><span class="source-meta hash">{esc(source["id"])}</span><div class="source-title">{esc(source["title"])}</div><div class="source-meta">{esc(pub)}{" · " + esc(loc) if loc else ""}</div><div class="source-meta">{link}</div><p class="source-excerpt">{esc(source.get("excerpt") or "")}</p></article>')
     source_section = f'<section id="sources" class="section"><div class="section-heading"><div><h2>{esc(t["sources_title"])}</h2><p class="section-description">{esc(t["sources_desc"])}</p></div></div><div class="card sources">'+''.join(sources)+'</div></section>'
     order = topics + model if view == "longitudinal" else model + topics
+    explorer = render_explorer(data, t) if view == "full" else ""
     if view == "longitudinal" and data.get("metrics") is None:
         overview += objective_metrics(data, lang=lang)
-    body = f'<div class="shell"><header class="topbar"><div class="brand"><span class="mark">✓</span> CLAIM AUDIT <span style="font-weight:400;letter-spacing:0;color:var(--muted)">{esc(t["brand_sub"])}</span></div><div class="top-meta">{esc(r["generated_at"])}<br>{esc(t["static_note"])}</div></header><div class="layout"><aside class="sidebar"><div class="nav-title">{esc(t["nav_title"])}</div>{navigation}<div class="side-note">{t["side_note"]}</div></aside><main class="content">{overview}{order}{case_section}{coverage}{source_section}<footer class="footer"><span>{esc(t["footer_synth"] if data["synthetic"] else t["footer_real"])}</span><span class="hash">{esc(prepared["rubric_hash"][:12])} · {esc(str(data.get("data_hash") or t["not_provided"])[:12])}</span></footer></main></div></div>'
+    body = f'<div class="shell"><header class="topbar"><div class="brand"><span class="mark">✓</span> CLAIM AUDIT <span style="font-weight:400;letter-spacing:0;color:var(--muted)">{esc(t["brand_sub"])}</span></div><div class="top-meta">{esc(r["generated_at"])}<br>{esc(t["static_note"])}</div></header><div class="layout"><aside class="sidebar"><div class="nav-title">{esc(t["nav_title"])}</div>{navigation}<div class="side-note">{t["side_note"]}</div></aside><main class="content">{overview}{order}{case_section}{explorer}{coverage}{source_section}<footer class="footer"><span>{esc(t["footer_synth"] if data["synthetic"] else t["footer_real"])}</span><span class="hash">{esc(prepared["rubric_hash"][:12])} · {esc(str(data.get("data_hash") or t["not_provided"])[:12])}</span></footer></main></div></div>'
     return f'<!DOCTYPE html><html lang="{t["html_lang"]}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>{esc(r["title"])}</title><style>{theme_css(theme)}{CSS}</style></head><body>{body}</body></html>'
 
 

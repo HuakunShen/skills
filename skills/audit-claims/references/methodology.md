@@ -199,6 +199,10 @@
 报告领域分数、时间段分数、**预测难度分层**与**预测提前期（lead time）分布**：
 
 - **预测难度评估（事前）**：在核验结果前为预测标注 `difficulty`（`trivial` / `moderate` / `hard` / `non_consensus`）、可选 `difficulty_score`（1–5）与 `difficulty_rationale`，明确区分“太阳从东边升起 / 近 100% 基准概率”的平凡断言与实质性/反共识预测。指标中单独展示各难度层级支持率与非平凡预测支持率（`non_trivial_strict_support_rate`），防止大量平凡预测虚高观感。
+- **事实可信度（客观核查，仅事实型主张）**：`factual_credibility` 只统计已采纳裁决的 `factual` 主张，给出证伪率（`contradicted / 事实型已裁决数`）、无据传谣率（证伪且 `uncited_specific`/`uncited_vague`）与事实诚信分（0–100）。单条得分：支持 1.0、部分支持 0.5、有出处或未标注的证伪 0.0、无据证伪 −0.5（截断至 0–100）；无据证伪因此比有出处的证伪扣分更重，部分支持（混淆）扣分较轻。
+- **难度加权预测分**：`difficulty_adjusted` 以 trivial 0.5 / moderate 1 / hard 2 / non-consensus 3 加权，分数 = 100 × Σ(权重×支持) / (n × 3)，只做平凡预测的记录无法得高分；另给出 `weighted_strict_support_rate`、提前量加权支持率（权重 log2(1 + 提前天数/30)）与高确信度差距（整体支持率减高确信度支持率，正值表示高确信度表述更不准；确信度由 `certainty_text` 中的标记词判定，属启发式）。
+- **交通灯**：正向指标绿 ≥80% / 黄 60–79.9% / 红 <60%；错误率（证伪率、无据传谣率）绿 <5% / 黄 5–15% / 红 >15%。
+- **主观评分归属**：8 维表达评价与难度评级都标注给出评分的模型（`subjective_attribution`），多模型时显示平均值；客观核查指标以证据为依据，二者在报告中分开标注。
 - **严格时间护栏（`target_date > published_at`）**：任何带明确截止日的 `prediction` 必须指向严格晚于发表时间的事件（如 10 月 1 日视频提及 9 月 30 日事件应归入 `factual`，不得进入预测分母）；脚本在 `freeze-criteria`、`audit_run.py validate`、`adopt_verdict.py` 与 `score_claims.py` 强制校验。
 - **预测提前期统计（Lead Time）**：对同时具备 `first_stated_at` 与 `window_end` 的预测计算 `lead_time_days = window_end - first_stated_at`，输出平均/中位/命中平均提前期，并按 `<=30d`、`31-90d`、`91-180d`、`181-365d`、`>365d` 桶统计数量与支持率，体现更早给出准确判断的信息与决策价值。
 

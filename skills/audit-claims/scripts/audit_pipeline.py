@@ -162,7 +162,7 @@ def bind_policy(ledger, run, model_policy_path=None, rules_json=None, allow_rebi
 
 
 def freeze_criteria(ledger, run, claim_id, definition_path, version="1", *,
-                    difficulty=None, difficulty_score=None, difficulty_rationale=None):
+                    difficulty=None, difficulty_score=None, difficulty_rationale=None, difficulty_model_id=None):
     run = Path(run).resolve()
     definition = common.read_json(Path(definition_path))
     if not isinstance(definition, dict):
@@ -181,6 +181,8 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1", *,
         raise ValueError("difficulty_score must be an integer from 1 to 5")
     if difficulty_rationale is not None and not isinstance(difficulty_rationale, str):
         raise ValueError("difficulty_rationale must be a string")
+    if difficulty_model_id is not None and not common.nonempty(difficulty_model_id):
+        raise ValueError("difficulty_model_id must be a nonempty model id when given")
     crit_zone = ZoneInfo(definition["timezone"])
     with ledger.coordinator_lock(run):
         cfg = ledger.config(run)
@@ -225,6 +227,8 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1", *,
             claim["difficulty_score"] = difficulty_score
         if difficulty_rationale is not None:
             claim["difficulty_rationale"] = difficulty_rationale
+        if difficulty_model_id is not None:
+            claim["difficulty_model_id"] = difficulty_model_id
         claim["accountability_eligible"] = bool(claim.get("empirical")) and claim.get("verifiability") in {"verifiable", "conditional"}
         claim["operationalization_status"] = "operationalized" if claim["accountability_eligible"] else "not_operationalizable"
         claim["due_for_assessment"] = due if claim["accountability_eligible"] else False
@@ -637,6 +641,7 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 "url": e.get("source_url"), "published_at": e.get("published_at"),
                 "locator": e.get("local_path") or e.get("source_family") or "", "excerpt": e.get("excerpt") or "",
             })
+        url_by_id = {s["id"]: s["url"] for s in report_sources if s.get("url")}
         cases = []
         for c in claims:
             lifecycle = c.get("lifecycle")
@@ -645,8 +650,8 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 c.get("reason") == "trigger_unmet" or c.get("criteria") is not None
             )
             is_notable_hypothetical = lifecycle == "unscorable" and c.get("claim_type") == "hypothetical"
-            if not (is_resolved or is_notable_pending or is_notable_hypothetical):
-                continue
+            # Every canonical claim is exported so the single-file dashboard can filter the whole corpus;
+            # narrative cards are still reserved for notable claims (see render_report).
             occ_details = []
             occ_source_ids = []
             for oid in c.get("occurrence_ids") or []:
@@ -686,10 +691,16 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 else:
                     reason = c.get("reason") or "not_yet_due"
                     assessment = f"Pending assessment ({reason}; not scored as error)."
-            else:
+            elif lifecycle == "unscorable":
                 status = "not_checked"
-                reason = c.get("reason") or "hypothetical_scenario"
-                assessment = f"Unscorable hypothetical scenario ({reason}); excluded from empirical accuracy denominators."
+                reason = c.get("reason") or ("hypothetical_scenario" if c.get("claim_type") == "hypothetical" else "unscorable")
+                assessment = (f"Unscorable hypothetical scenario ({reason}); excluded from empirical accuracy denominators."
+                              if c.get("claim_type") == "hypothetical" else
+                              f"Unscorable claim ({reason}); excluded from accuracy denominators.")
+            else:
+                status = "pending"
+                reason = c.get("reason") or "not_yet_due"
+                assessment = f"Pending assessment ({reason}; lifecycle={lifecycle}; not scored as error)."
             ev_ids = [eid for eid in c.get("evidence_ids", []) if eid in seen_sids]
             if not ev_ids:
                 ev_ids = occ_source_ids
@@ -738,6 +749,10 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 case_obj["difficulty_rationale"] = c["difficulty_rationale"]
             if lead_time_days is not None:
                 case_obj["lead_time_days"] = lead_time_days
+            case_obj["verdict"] = c.get("outcome")
+            case_obj["citation_status"] = c.get("citation_status")
+            case_obj["evidence_urls"] = [url_by_id[eid] for eid in ev_ids if eid in url_by_id]
+            case_obj["notable"] = bool(is_resolved or is_notable_pending or is_notable_hypothetical)
             if first_quote:
                 case_obj["original_quote"] = first_quote
             if ts_summary:
@@ -781,6 +796,15 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                     f"Dated predictions ({phor['dated_n']}): mean lead time {phor['mean_lead_time_days']:.1f}d, median {phor['median_lead_time_days']:.1f}d."
                 )
         report_subject = subject_id or cfg["subject"]
+        rubric_dim_ids = [d["id"] for d in rubric.get("dimensions", []) if isinstance(d, dict) and d.get("id")]
+        pdiff_all = (metrics or {}).get("prediction_difficulty") or {}
+        subjective_attribution = {
+            "rubric": panel.subjective_attribution(panel_obj["policy"], panel_obj["reviews"], rubric_dim_ids,
+                                                   judge=panel_obj.get("judge")) if panel_obj else None,
+            "difficulty": {"subjective": True, "rated_n": pdiff_all.get("rated_n", 0),
+                           "rated_by_model_id": pdiff_all.get("rated_by_model_id", {})},
+            "note": "Subjective ratings (rubric scores, difficulty tiers) are attributed to the model(s) that produced them; objective fact-check metrics are evidence-backed and separate.",
+        }
         payload = {
             "schema_version": 1, "synthetic": bool(synthetic), "data_hash": data_hash,
             "rubric": rubric,
@@ -791,7 +815,8 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 "as_of": cfg["scope"]["as_of"][:10], "generated_at": common.now()[:10],
                 "summary": summary_lines,
             },
-            "metrics": metrics, "panel": panel_obj, "topics": [], "cases": cases,
+            "metrics": metrics, "panel": panel_obj, "subjective_attribution": subjective_attribution,
+            "topics": [], "cases": cases,
             "coverage": coverage,
             "costs": {"estimated_usd": est_usd, "observed_usd": obs_usd, "budget_usd": (cfg.get("costs") or {}).get("approved_budget_usd")},
             "sources": report_sources,

@@ -30,6 +30,19 @@ KINDS = {"factual", "prediction", "causal", "recommendation", "value_judgment",
 LIFECYCLES = {"pending", "ready", "awaiting_evidence", "resolved", "unscorable", "disputed"}
 OUTCOMES = {"supported", "contradicted", "mixed", "indeterminate", None}
 Z_95 = 1.959963984540054
+# Per-claim credit for factual honesty: a contradicted claim with no citation (造谣/无据传谣)
+# loses more than a contradicted claim that cited something (honest error), and mixed
+# verdicts (conflation) sit in between.
+FACTUAL_CREDIT = {"supported": 1.0, "mixed": 0.5, "contradicted": 0.0, "contradicted_uncited": -0.5}
+UNSUBSTANTIATED_STATUSES = {"uncited_specific", "uncited_vague"}
+# Difficulty weights so trivial-only forecasters cannot score high; the score divides by the max weight.
+DIFFICULTY_WEIGHTS = {"trivial": 0.5, "moderate": 1.0, "hard": 2.0, "non_consensus": 3.0}
+DIFFICULTY_MAX_WEIGHT = max(DIFFICULTY_WEIGHTS.values())
+LEAD_TIME_HALF_SCALE_DAYS = 30
+HIGH_CERTAINTY_MARKERS = ("一定", "肯定", "必然", "毫无疑问", "百分之百", "板上钉钉", "100%",
+                          "definitely", "certainly", "certain", "no doubt", "guarantee", "sure")
+HEDGE_MARKERS = ("不一定", "不确定", "可能", "或许", "也许", "unsure", "uncertain", "not sure", "might", "may", "possibly", "perhaps")
+TRAFFIC_LIGHTS = ("green", "yellow", "red")
 
 
 def canonical(obj):
@@ -293,7 +306,112 @@ def _sourcing_rigor(claims):
     }
 
 
-def core_metrics(claims, *, bootstrap_clusters=False):
+def traffic_light(value, *, error_rate=False, scale=1.0):
+    """Green/yellow/red tier for a fraction, or for a 0-100 score with scale=100.
+
+    Higher-is-better: green >= 80%, yellow 60-79.9%, red < 60%.
+    Error rates (error_rate=True): green < 5%, yellow 5-15%, red > 15%.
+    """
+    if not finite_number(value):
+        return None
+    fraction = value / scale
+    if error_rate:
+        return "green" if fraction < 0.05 else "yellow" if fraction <= 0.15 else "red"
+    return "green" if fraction >= 0.80 else "yellow" if fraction >= 0.60 else "red"
+
+
+def _with_light(ratio_obj, *, error_rate=False):
+    ratio_obj["traffic_light"] = traffic_light(ratio_obj["value"], error_rate=error_rate)
+    return ratio_obj
+
+
+def _is_high_certainty(claim):
+    text = claim.get("certainty_text")
+    if not isinstance(text, str) or not text.strip():
+        return False
+    lowered = text.lower()
+    if any(hedge in lowered for hedge in HEDGE_MARKERS):
+        return False
+    return any(marker.lower() in lowered for marker in HIGH_CERTAINTY_MARKERS)
+
+
+def _factual_credibility(claims):
+    """Anti-misinformation view over adjudicated factual claims only (predictions are scored separately)."""
+    factual = [c for c in claims if c["claim_type"] == "factual"]
+    categorical = _adjudication_sets(factual)[3]
+    n = len(categorical)
+    counts = {v: sum(c["outcome"] == v for c in categorical) for v in ("supported", "contradicted", "mixed")}
+    contradicted = [c for c in categorical if c["outcome"] == "contradicted"]
+    uncited = [c for c in contradicted if c.get("citation_status") in UNSUBSTANTIATED_STATUSES]
+    cited_or_untagged = len(contradicted) - len(uncited)
+    credit_sum = (counts["supported"] * FACTUAL_CREDIT["supported"]
+                  + counts["mixed"] * FACTUAL_CREDIT["mixed"]
+                  + cited_or_untagged * FACTUAL_CREDIT["contradicted"]
+                  + len(uncited) * FACTUAL_CREDIT["contradicted_uncited"])
+    score = round(min(100.0, max(0.0, 100 * credit_sum / n)), 2) if n else None
+    return {
+        "factual_categorical_n": n,
+        "counts": {**counts, "contradicted_uncited": len(uncited)},
+        "small_sample": n < POLICY["minimum_categorical_sample"],
+        "contradiction_rate": _with_light(ratio(len(contradicted), n, with_ci=True), error_rate=True),
+        "misinformation_rate": _with_light(ratio(len(uncited), n, with_ci=True), error_rate=True),
+        "factual_honesty_score": {
+            "value": score, "scale": [0, 100], "traffic_light": traffic_light(score, scale=100),
+            "credit": dict(FACTUAL_CREDIT), "untagged_contradicted_n": sum(c.get("citation_status") is None for c in contradicted),
+            "formula": "100 * mean(credit): supported 1.0, mixed 0.5, cited or untagged contradicted 0.0, uncited contradicted -0.5, clipped to 0-100",
+            "label": "heuristic_credibility_index_not_truth_verdict",
+        },
+    }
+
+
+def _lead_time_weight(days):
+    return math.log2(1 + max(0.0, days) / LEAD_TIME_HALF_SCALE_DAYS)
+
+
+def _difficulty_adjusted(claims):
+    """Forecast accuracy that rewards hard calls and penalizes trivial-only track records."""
+    preds = [c for c in claims if c["claim_type"] == "prediction"]
+    categorical = _adjudication_sets(preds)[3]
+    rated = [c for c in categorical if common.resolve_difficulty_tier(c) in DIFFICULTY_WEIGHTS]
+    n = len(rated)
+    weight_total = sum(DIFFICULTY_WEIGHTS[common.resolve_difficulty_tier(c)] for c in rated)
+    weight_hit = sum(DIFFICULTY_WEIGHTS[common.resolve_difficulty_tier(c)] for c in rated if c["outcome"] == "supported")
+    by_tier = {}
+    for tier, weight in DIFFICULTY_WEIGHTS.items():
+        group = [c for c in rated if common.resolve_difficulty_tier(c) == tier]
+        by_tier[tier] = {"weight": weight, "n": len(group), "supported": sum(c["outcome"] == "supported" for c in group)}
+    score = round(100 * weight_hit / (n * DIFFICULTY_MAX_WEIGHT), 2) if n else None
+    dated = [(c, days) for c in categorical for days in [_lead_time_days(c)] if days is not None]
+    lead_den = sum(_lead_time_weight(days) for _, days in dated)
+    lead_num = sum(_lead_time_weight(days) for c, days in dated if c["outcome"] == "supported")
+    overall = ratio(sum(c["outcome"] == "supported" for c in categorical), len(categorical))["value"]
+    high = [c for c in categorical if _is_high_certainty(c)]
+    high_rate = ratio(sum(c["outcome"] == "supported" for c in high), len(high))["value"]
+    gap = round(overall - high_rate, 6) if overall is not None and high_rate is not None else None
+    return {
+        "weights": dict(DIFFICULTY_WEIGHTS), "max_weight": DIFFICULTY_MAX_WEIGHT,
+        "weighted_n": n, "unrated_excluded_n": len(categorical) - n, "by_tier": by_tier,
+        "weighted_strict_support_rate": round(weight_hit / weight_total, 6) if weight_total else None,
+        "difficulty_exposure": round(weight_total / (n * DIFFICULTY_MAX_WEIGHT), 6) if n else None,
+        "difficulty_adjusted_score": {
+            "value": score, "scale": [0, 100], "traffic_light": traffic_light(score, scale=100),
+            "formula": "100 * sum(weight * supported) / (n * max_weight)",
+        },
+        "lead_time_weighted_support_rate": {
+            "value": round(lead_num / lead_den, 6) if lead_den else None,
+            "numerator": round(lead_num, 4), "denominator": round(lead_den, 4), "dated_n": len(dated),
+            "weight": "log2(1 + max(0, lead_time_days) / 30)",
+        },
+        "overconfidence_gap": {
+            "value": gap, "overall_strict_support_rate": overall, "high_certainty_strict_support_rate": high_rate,
+            "high_certainty_n": len(high), "certainty_text_n": sum(bool(str(c.get("certainty_text") or "").strip()) for c in categorical),
+            "definition": "overall minus high-certainty strict support; positive means high-certainty calls underperform",
+            "marker_source": "heuristic_certainty_text_markers",
+        },
+    }
+
+
+def _adjudication_sets(claims):
     eligible = [c for c in claims if c["empirical"] and c["endorsement"] == "endorsed"
                 and c["attribution_confidence"] == "high"]
     # Exclude exploratory inferred-probability claims from the due denominator so they don't depress coverage.
@@ -305,6 +423,11 @@ def core_metrics(claims, *, bootstrap_clusters=False):
                    and c["outcome"] in {"supported", "contradicted", "mixed"}]
     probability = [c for c in resolved if c["evaluation_mode"] == "probabilistic"
                    and c["probability_origin"] == "explicit" and type(c["event_occurred"]) is bool]
+    return eligible, due, resolved, categorical, probability
+
+
+def core_metrics(claims, *, bootstrap_clusters=False):
+    eligible, due, resolved, categorical, probability = _adjudication_sets(claims)
     indeterminate_resolved = [c for c in due if c["lifecycle"] == "resolved" and c["outcome"] == "indeterminate"]
     adjudicated = categorical + probability
     counts = {v: sum(c["outcome"] == v for c in categorical)
@@ -397,6 +520,12 @@ def _prediction_difficulty_stats(claims, bootstrap_clusters=False):
         tier_metrics["mean_difficulty_score"] = round(statistics.mean(t_scores), 3) if t_scores else None
         by_tier[tier] = tier_metrics
     rated = [c for c in preds if common.resolve_difficulty_tier(c) != "unrated"]
+    # Difficulty ratings are subjective: count them per recorded rater model so reports can attribute them.
+    rated_by_model = {}
+    for c in rated:
+        rater = c.get("difficulty_model_id")
+        key = rater if isinstance(rater, str) and rater.strip() else "unrecorded"
+        rated_by_model[key] = rated_by_model.get(key, 0) + 1
     non_trivial = [c for c in preds if common.resolve_difficulty_tier(c) in {"moderate", "hard", "non_consensus"}]
     trivial = grouped["trivial"]
     non_trivial_m = core_metrics(non_trivial, bootstrap_clusters=bootstrap_clusters)
@@ -407,6 +536,8 @@ def _prediction_difficulty_stats(claims, bootstrap_clusters=False):
         "total_predictions": len(preds),
         "rated_n": len(rated),
         "unrated_n": len(preds) - len(rated),
+        "rated_by_model_id": dict(sorted(rated_by_model.items())),
+        "subjective_rating": True,
         "mean_difficulty_score": round(statistics.mean(scores), 3) if scores else None,
         "non_trivial_strict_support_rate": non_trivial_m["strict_support_rate"],
         "trivial_strict_support_rate": trivial_m["strict_support_rate"],
@@ -576,6 +707,8 @@ def calculate(claims, coverage, *, composite=False, policy=None, occurrences=Non
     }
     metrics["prediction_difficulty"] = _prediction_difficulty_stats(claims, bootstrap_clusters=bootstrap_clusters)
     metrics["prediction_horizon"] = _prediction_horizon_stats(claims, bootstrap_clusters=bootstrap_clusters)
+    metrics["factual_credibility"] = _factual_credibility(claims)
+    metrics["difficulty_adjusted"] = _difficulty_adjusted(claims)
     metrics["selection_funnel"] = {
         "total_canonical_claims": len(claims),
         "empirical": sum(1 for c in claims if c["empirical"]),

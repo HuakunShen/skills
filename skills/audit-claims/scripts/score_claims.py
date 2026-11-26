@@ -183,6 +183,12 @@ def validate_claim(c):
     diff_rat = c.get("difficulty_rationale")
     if diff_rat is not None and not isinstance(diff_rat, str):
         raise ValueError(f"{cid}: difficulty_rationale must be a string or null")
+    cit_status = c.get("citation_status")
+    if cit_status is not None and cit_status not in common.CITATION_STATUSES:
+        raise ValueError(f"{cid}: invalid citation_status")
+    cit_text = c.get("citation_text")
+    if cit_text is not None and not isinstance(cit_text, str):
+        raise ValueError(f"{cid}: citation_text must be a string or null")
     if c["claim_type"] == "prediction":
         stated_at = common.earliest_stated_at(c)
         target_end = common.claim_target_deadline(c)
@@ -266,6 +272,27 @@ def _family_stats(categorical_claims, bootstrap=False, seed=2026):
     }
 
 
+def _sourcing_rigor(claims):
+    """Claim-level citation and checkability over endorsed empirical claims (legacy untagged runs stay valid)."""
+    population = [c for c in claims if c["empirical"] and c["endorsement"] == "endorsed"]
+    counts = {k: sum(c.get("citation_status") == k for c in population) for k in common.CITATION_STATUSES}
+    counts["untagged"] = sum(c.get("citation_status") is None for c in population)
+    tagged_n = len(population) - counts["untagged"]
+    checkable_n = sum(c["verifiability"] in {"verifiable", "conditional"} for c in population)
+    primary_n = counts["primary_cited"]
+    cited_n = primary_n + counts["secondary_cited"]
+    unsubstantiated_n = counts["uncited_specific"] + counts["uncited_vague"]
+    return {
+        "population_n": len(population), "tagged_n": tagged_n, "counts": counts,
+        "shares": {k: ratio(counts[k], tagged_n) for k in common.CITATION_STATUSES},
+        "untagged_share": ratio(counts["untagged"], len(population)),
+        "citation_rate": ratio(cited_n, tagged_n, with_ci=True),
+        "primary_citation_rate": ratio(primary_n, tagged_n, with_ci=True),
+        "unsubstantiated_rate": ratio(unsubstantiated_n, tagged_n, with_ci=True),
+        "checkable_rate": ratio(checkable_n, len(population), with_ci=True),
+    }
+
+
 def core_metrics(claims, *, bootstrap_clusters=False):
     eligible = [c for c in claims if c["empirical"] and c["endorsement"] == "endorsed"
                 and c["attribution_confidence"] == "high"]
@@ -323,6 +350,7 @@ def core_metrics(claims, *, bootstrap_clusters=False):
         "excluded_from_categorical_accuracy": len(claims) - len(categorical),
         "unaccepted_due_claims": unaccepted_due,
         "quality_blocked_resolutions": sum(c["lifecycle"] == "resolved" and c["outcome"] in {"supported", "contradicted", "mixed"} and not quality_allows_verdict(c) for c in due),
+        "sourcing_rigor": _sourcing_rigor(claims),
     }
 
 
@@ -617,7 +645,7 @@ def atomic_write(path, text):
 def csv_text(claims):
     cols = ["claim_id", "text", "domain", "claim_type", "family_id", "difficulty", "difficulty_score",
             "lead_time_days", "quantifiability", "verifiability",
-            "lifecycle", "outcome", "probability", "occurrence_ids", "evidence_ids"]
+            "lifecycle", "outcome", "probability", "citation_status", "occurrence_ids", "evidence_ids"]
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=cols)
     writer.writeheader()

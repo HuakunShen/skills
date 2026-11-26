@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 DIFFICULTY_TIERS = ("trivial", "moderate", "hard", "non_consensus")
 DIFFICULTY_SCORE_TO_TIER = {1: "trivial", 2: "moderate", 3: "moderate", 4: "hard", 5: "non_consensus"}
 HORIZON_BUCKETS = ("le_30d", "31_90d", "91_180d", "181_365d", "gt_365d")
+CITATION_STATUSES = ("primary_cited", "secondary_cited", "uncited_specific", "uncited_vague")
 
 BIDI_CONTROLS = frozenset({
     "\u200e", "\u200f", "\u061c",

@@ -333,6 +333,12 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                     if oid in occ_by_id and not occ_by_id[oid].get("claim_id"):
                         occ_by_id[oid]["claim_id"] = cid
                 if cid not in claim_by_id:
+                    citation_status = raw_claim.get("citation_status")
+                    if citation_status is not None and citation_status not in common.CITATION_STATUSES:
+                        raise ValueError(f"Claim {cid} has invalid citation_status: {citation_status!r}")
+                    citation_text = raw_claim.get("citation_text")
+                    if citation_text is not None and not isinstance(citation_text, str):
+                        raise ValueError(f"Claim {cid} citation_text must be a string or null")
                     c_rec = {
                         "schema_version": 1, "claim_id": cid, "subject_id": raw_claim.get("subject_id", cfg["subject"]),
                         "occurrence_ids": occ_ids, "text": raw_claim["text"], "domain": raw_claim.get("domain", "general"),
@@ -354,8 +360,9 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                         "quote_verified": all_quotes_ok,
                     }
                     # Preserve optional schema fields (reason, certainty_text, first_stated_at,
-                    # supersedes, next_check_at, family_id, operationalization_status, etc.)
-                    # while blocking shards from forging post-adjudication fields.
+                    # supersedes, next_check_at, family_id, operationalization_status,
+                    # citation_status, citation_text, etc.) while blocking shards from forging
+                    # post-adjudication fields. Absent citation tags stay absent (legacy runs).
                     for key, value in raw_claim.items():
                         if key in c_rec or key in EXTRACTION_PROTECTED_CLAIM_FIELDS or value is None:
                             continue

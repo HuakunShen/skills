@@ -44,6 +44,12 @@ worker 只写自己的任务结果文件，例如 `work/<task_id>/result.json` �
 为每条保留原话、说话者、归属置信度、endorsement、source_id、时间戳/行号、上下文、语言。
 拆分独立命题，保留父子关系、否定、条件、量词和适用范围。
 独立标注 claim_type、empirical、quantifiability、verifiability；不将没有数字的事实视为不可验证。
+为每条 empirical 断言标注 `citation_status` 与 `citation_text`（出处与可查证度，只依据原文与正文中的引用措辞判断，不查证、不补造）：
+- `primary_cited`：说话者引用了可定位的一手来源（机构 + 报告/日期/表格/URL 等），`citation_text` 填其原始出处短语。
+- `secondary_cited`：引用二手媒体、未具名报告或模糊第三方（“某媒体报道”“研究显示”），`citation_text` 填原短语。
+- `uncited_specific`：给出具体数字或日期却没有任何出处（“张口就来”的具体断言），`citation_text` 为 null。
+- `uncited_vague`：含糊断言且无出处、无可核验锚点（“内部消息”“很多人说”），`citation_text` 为 null。
+无法归入以上四类时不要猜测，填 null 并在 reason 中说明。
 提取原文明确的期限与概率；无法确定则 null 并给理由，不能补造。
 严格区分预测与事实的时间顺序：只有目标事件/截止日严格晚于发表时间（target_date > published_at）的断言才能标为 prediction；回顾已发生事件（例如 10 月 1 日视频评论 9 月 30 日事件）必须标为 factual。
 标题/封面与正文归属护栏（Title-vs-Speech Guardrail）：所有进入个人计分的 endorsed 断言必须有正文或口述转录中的 original_quote 支撑，绝不能仅凭标题党标题、封面数字或缩略图将主张归给说话者；若标题断言在正文中未提及、被弱化为假设/提问或被本人否定，不得标为 endorsed，须以正文原话为准（如需记录标题偏差，单独注明 source_surface="title_only"、endorsement="unclear"、attribution_confidence="low"）。

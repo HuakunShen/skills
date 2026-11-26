@@ -454,5 +454,64 @@ class RenderReportTests(unittest.TestCase):
         self.assertIsNone(re.search(r'[\u4e00-\u9fff]', legacy_radar_en), 'Found leaked CJK characters with legacy rubric in --lang en SVG')
 
 
+
+class SourcingRigorRenderTests(unittest.TestCase):
+    def metrics(self):
+        import score_claims as scoring
+        import test_score_claims as fixtures
+        rows = [
+            fixtures.claim('p1', claim_type='prediction', citation_status='uncited_specific', citation_text=None),
+            fixtures.claim('p2', claim_type='prediction', citation_status='primary_cited', citation_text='Fed Beige Book, 2026-03'),
+            fixtures.claim('f1', claim_type='factual', citation_status='secondary_cited', citation_text='据媒体报道'),
+            fixtures.claim('f2', claim_type='factual', citation_status='uncited_vague', citation_text=None),
+            fixtures.claim('f3', claim_type='factual'),
+        ]
+        return {'sourcing_rigor': scoring.core_metrics(rows)['sourcing_rigor'],
+                'by_claim_type': {ct: scoring.core_metrics([r for r in rows if r['claim_type'] == ct])
+                                  for ct in ('factual', 'prediction')}}
+
+    def test_sourcing_svg_is_valid_xml_in_zh_and_en_without_cjk_leaks_in_english(self):
+        import re
+        import xml.etree.ElementTree as ET
+        m = self.metrics()
+        for lang in ('zh', 'en'):
+            rows = renderer._sourcing_rows(m, renderer.I18N[lang])
+            svg = renderer.render_sourcing_rigor_svg(rows, lang=lang)
+            root = ET.fromstring(svg)
+            self.assertEqual(root.tag, SVG + 'svg')
+            fills = {el.get('fill') for el in root.iter(SVG + 'rect') if el.get('fill')}
+            for color in ('#10B981', '#0EA5E9', '#F59E0B', '#F43F5E'):
+                self.assertIn(color, fills)
+            if lang == 'en':
+                self.assertIsNone(re.search(r'[\u3400-\u9fff\uff00-\uffef]', svg))
+        self.assertIn('出处构成', renderer.render_sourcing_rigor_svg(renderer._sourcing_rows(m, renderer.I18N['zh']), lang='zh'))
+
+    def test_sourcing_section_renders_chips_table_and_legacy_note_in_zh_and_en(self):
+        import re
+        m = self.metrics()
+        zh = renderer.render_sourcing_rigor_section(m, lang='zh')
+        self.assertIn('出处与可查证度', zh)
+        self.assertIn('张口就来率', zh)
+        self.assertIn('<svg', zh)
+        en = renderer.render_sourcing_rigor_section(m, lang='en')
+        self.assertIn('Sourcing Rigor &amp; Checkability', en)
+        self.assertIn('Unsubstantiated rate', en)
+        self.assertIn('Primary cited', en)
+        self.assertIsNone(re.search(r'[\u3400-\u9fff\uff00-\uffef]', en))
+        self.assertIn('chip-rose', en)
+        # Legacy ledger: no citation tags -> explicit note, no bar chart, no invented zero rate.
+        legacy = renderer.render_sourcing_rigor_section({'sourcing_rigor': {'population_n': 3, 'tagged_n': 0,
+                                                                            'counts': {'untagged': 3}}}, lang='en')
+        self.assertIn('legacy ledger', legacy)
+        self.assertNotIn('<svg', legacy)
+        self.assertEqual(renderer.render_sourcing_rigor_section({}, lang='en'), '')
+
+    def test_objective_metrics_places_sourcing_section_for_both_languages(self):
+        m = self.metrics()
+        html_zh = renderer.objective_metrics({'metrics': m}, lang='zh')
+        html_en = renderer.objective_metrics({'metrics': m}, lang='en')
+        self.assertIn('出处与可查证度', html_zh)
+        self.assertIn('Sourcing Rigor', html_en)
+
 if __name__ == '__main__':
     unittest.main()

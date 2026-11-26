@@ -322,5 +322,62 @@ class ScoreClaimTests(unittest.TestCase):
         self.assertEqual(float(by_id['p120']['lead_time_days']), 120.0)
 
 
+class SourcingRigorTests(unittest.TestCase):
+    def test_citation_counts_rates_and_checkability_with_untagged_legacy_claims(self):
+        rows = [
+            claim('primary', citation_status='primary_cited', verifiability='verifiable'),
+            claim('secondary', citation_status='secondary_cited', verifiability='unverifiable'),
+            claim('specific', citation_status='uncited_specific', verifiability='conditional'),
+            claim('vague', citation_status='uncited_vague', verifiability='unverifiable'),
+            claim('legacy', verifiability='verifiable'),
+            # Quoted or non-empirical statements are outside the speaker's own endorsed empirical population.
+            claim('quoted', citation_status='primary_cited', endorsement='quoted'),
+            claim('opinion', citation_status='uncited_vague', empirical=False, claim_type='preference'),
+        ]
+        sr = scoring.core_metrics(rows)['sourcing_rigor']
+        self.assertEqual(sr['population_n'], 5)
+        self.assertEqual(sr['tagged_n'], 4)
+        self.assertEqual(sr['counts'], {'primary_cited': 1, 'secondary_cited': 1, 'uncited_specific': 1,
+                                        'uncited_vague': 1, 'untagged': 1})
+        self.assertAlmostEqual(sr['citation_rate']['value'], 0.5)
+        self.assertAlmostEqual(sr['primary_citation_rate']['value'], 0.25)
+        self.assertAlmostEqual(sr['unsubstantiated_rate']['value'], 0.5)
+        self.assertAlmostEqual(sr['checkable_rate']['value'], 3 / 5)
+        self.assertAlmostEqual(sr['untagged_share']['value'], 1 / 5)
+        self.assertAlmostEqual(sr['shares']['uncited_specific']['value'], 0.25)
+        self.assertIsNotNone(sr['citation_rate']['ci_95'])
+
+    def test_sourcing_rigor_is_reported_overall_and_per_group(self):
+        rows = [claim('p1', claim_type='prediction', citation_status='uncited_specific'),
+                claim('p2', claim_type='prediction', citation_status='primary_cited'),
+                claim('f1', claim_type='factual', citation_status='secondary_cited')]
+        result = scoring.calculate(rows, copy.deepcopy(COVERAGE))
+        self.assertEqual(result['sourcing_rigor']['tagged_n'], 3)
+        self.assertAlmostEqual(result['by_claim_type']['prediction']['sourcing_rigor']['unsubstantiated_rate']['value'], 0.5)
+        self.assertAlmostEqual(result['by_claim_type']['factual']['sourcing_rigor']['citation_rate']['value'], 1.0)
+        self.assertEqual(result['by_claim_type']['factual']['sourcing_rigor']['tagged_n'], 1)
+
+    def test_legacy_ledger_without_citation_tags_is_not_a_zero_rate(self):
+        rows = [claim('a'), vague('b')]
+        result = scoring.calculate(rows, copy.deepcopy(COVERAGE))
+        sr = result['sourcing_rigor']
+        self.assertEqual(sr['tagged_n'], 0)
+        self.assertEqual(sr['counts']['untagged'], 2)
+        self.assertIsNone(sr['citation_rate']['value'])
+        self.assertIsNone(sr['unsubstantiated_rate']['value'])
+        self.assertAlmostEqual(sr['checkable_rate']['value'], 1 / 2)
+
+    def test_citation_fields_are_validated_and_exported(self):
+        with self.assertRaises(ValueError):
+            scoring.validate_claim(claim('bad_status', citation_status='hearsay'))
+        with self.assertRaises(ValueError):
+            scoring.validate_claim(claim('bad_text', citation_status='primary_cited', citation_text=['x']))
+        scoring.validate_claim(claim('ok', citation_status='primary_cited', citation_text='Reuters report'))
+        exported = list(csv.DictReader(io.StringIO(scoring.csv_text(
+            [claim('ok', citation_status='uncited_vague')]))))
+        self.assertEqual(exported[0]['citation_status'], 'uncited_vague')
+
+
+
 if __name__ == '__main__':
     unittest.main()

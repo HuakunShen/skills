@@ -51,6 +51,17 @@
 
 设置 `empirical` 表示是否对外部世界作出可讨论证据的断言。价值判断夹带事实前提时，把前提拆为 `empirical=true` 的独立记录。分类是对言论的分析结果，也应允许复核和修订。
 
+### 出处与可查证度（张口就来）
+
+对每条 `empirical=true` 的断言标注 `citation_status` 与 `citation_text`（说话者使用的原始出处短语，无则 null）：
+
+- `primary_cited`：引用可定位的一手来源（机构 + 报告/日期/表格/URL）。
+- `secondary_cited`：引用二手媒体、未具名报告或模糊第三方来源。
+- `uncited_specific`：给出具体数字或日期却零引用，即“张口就来”的具体断言。
+- `uncited_vague`：含糊断言，无引用也没有可核验锚点（如“内部消息”“很多人说”）。
+
+`score_claims.py` 在 `metrics.json` 的 `sourcing_rigor`（整体及每个分组）输出计数与比率：`citation_rate=(primary+secondary)/tagged`、`primary_citation_rate=primary/tagged`、`unsubstantiated_rate=(uncited_specific+uncited_vague)/tagged`（“张口就来率”）、`checkable_rate=verifiable|conditional 占 endorsed 实证断言的比例`。未标注计入 `untagged`，旧版账本缺省不报错，比率显示为不可计算。出处标签描述言论的引用方式，不改变核验裁定，也不作为事实真伪的证据。
+
 ### 重要区别
 
 | 原话示例（均为合成示例） | 正确处理 |

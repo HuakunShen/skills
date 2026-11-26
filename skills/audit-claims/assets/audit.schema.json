@@ -420,6 +420,23 @@
             }
           },
           "additionalProperties": true
+        },
+        "citation_status": {
+          "description": "Sourcing rigor of the speaker's assertion: primary_cited = locatable primary source; secondary_cited = media/unnamed/vague third party; uncited_specific = concrete figure or date with no citation; uncited_vague = vague unverifiable assertion with no citation or anchor.",
+          "enum": [
+            "primary_cited",
+            "secondary_cited",
+            "uncited_specific",
+            "uncited_vague",
+            null
+          ]
+        },
+        "citation_text": {
+          "description": "Exact source phrase the speaker used to cite, or null when none.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

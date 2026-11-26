@@ -86,6 +86,7 @@ endorsement=`endorsed|quoted|rejected|unclear`；转述别人的断言不自动�
 - 身份：claim_id、subject_id、occurrence_ids、text、domain、claim_type。
 - 归属：empirical、endorsement、attribution_confidence=`high|medium|low`。
 - 两条轴：quantifiability、verifiability；含糊和偏好不能混为一类。
+- 出处与可查证度：可选 `citation_status`（`primary_cited|secondary_cited|uncited_specific|uncited_vague`，或 null）与 `citation_text`（说话者使用的原始出处短语，无则 null）；缺省视为未标注（旧账本兼容）。合并时非法枚举直接报错。
 - 可检验性：accountability_eligible（有原文支持的清晰可操作规则）、criteria。
 - 状态：lifecycle、reason、due_for_assessment、outcome、resolved_at、next_check_at。
 - 预测难度与时间：可选 `difficulty`（`trivial|moderate|hard|non_consensus`）、`difficulty_score`（1–5）、`difficulty_rationale`（事前评估理由）、`first_stated_at`、`target_date`；带期限预测须满足 `window_end > first_stated_at`，脚本据此计算 `lead_time_days`。

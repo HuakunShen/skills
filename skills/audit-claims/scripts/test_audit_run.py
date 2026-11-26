@@ -353,6 +353,40 @@ class AuditRunTests(unittest.TestCase):
         self.assertEqual(merged_claim['evidence_ids'], [])
         self.assertNotIn('acceptance', merged_claim)
 
+    def _merge_single_claim(self, claim_fields):
+        import audit_pipeline as pipeline
+        self.sources([self.source('s1', text='[#cue-000001 10-15s]\nBitcoin might hit 120k.\n')])
+        self.plan(budget=2000, max_items=10)
+        task = self.task()
+        claim = {
+            'claim_id': 'clm_cite_1', 'text': 'Bitcoin hits 120k next year',
+            'claim_type': 'factual', 'empirical': True, 'verifiability': 'verifiable',
+            'occurrences': [{'source_id': 's1', 'original_quote': 'Bitcoin might hit 120k.',
+                             'locator': {'kind': 'cue', 'unit_id': 'cue-000001', 'start': 10.0, 'end': 15.0}}],
+            **claim_fields,
+        }
+        shard = {'task_id': task['task_id'], 'input_fingerprint': task['input_fingerprint'],
+                 'complete': True, 'processed_source_ids': ['s1'], 'claims': [claim]}
+        res_rel = f"work/results/{task['task_id']}.json"
+        audit.write_json(self.run / res_rel, shard)
+        audit.checkpoint(Namespace(run=str(self.run), task_id=task['task_id'], status='completed', result=res_rel, note=None))
+        pipeline.merge_extraction(audit, self.run)
+        return audit.read_jsonl(self.run / 'claims.jsonl')[0]
+
+    def test_merge_extraction_preserves_citation_status_and_text(self):
+        merged = self._merge_single_claim({'citation_status': 'secondary_cited', 'citation_text': '据某媒体报道'})
+        self.assertEqual(merged['citation_status'], 'secondary_cited')
+        self.assertEqual(merged['citation_text'], '据某媒体报道')
+
+    def test_merge_extraction_keeps_legacy_claims_without_citation_tags(self):
+        merged = self._merge_single_claim({})
+        self.assertNotIn('citation_status', merged)
+        self.assertNotIn('citation_text', merged)
+
+    def test_merge_extraction_rejects_unknown_citation_status(self):
+        with self.assertRaisesRegex(ValueError, 'invalid citation_status'):
+            self._merge_single_claim({'citation_status': 'trust_me_bro'})
+
     def test_build_report_data_no_20_truncation_loads_rationale_quotes_and_hashes(self):
         import audit_pipeline as pipeline
         self.sources([self.source('s1', text='Source text')])

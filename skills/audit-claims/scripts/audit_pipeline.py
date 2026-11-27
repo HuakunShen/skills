@@ -248,14 +248,14 @@ CJK_GAP = re.compile(rf"(?<={CJK_CHAR})\s+(?={CJK_CHAR})")
 CJK_ONE = re.compile(CJK_CHAR)
 
 
-def _join_cue_bodies(bodies):
-    """Join cue bodies with no separator where a CJK character touches the boundary, else with a space."""
+def _join_cue_bodies(bodies, join_all_boundaries=False):
+    """Join cue bodies with no separator at CJK-touching boundaries (or all boundaries when asked), else with a space."""
     out = ""
     for body in bodies:
         part = body.strip()
         if not part:
             continue
-        if out and not (CJK_ONE.match(out[-1]) or CJK_ONE.match(part[0])):
+        if out and not join_all_boundaries and not (CJK_ONE.match(out[-1]) or CJK_ONE.match(part[0])):
             out += " "
         out += part
     return out
@@ -299,9 +299,11 @@ def _verify_quote_in_source(source_text, locator, quote):
         if cjk_quote in CJK_GAP.sub("", common.normalize_quote_text(text)):
             return True, reason + "_cjk_join"
     # Tier 3: join cue bodies with an empty string where a CJK character meets a digit, Latin, or
-    # symbol across a cue boundary (e.g. "45%" | "王", "的" | "509.6").
+    # symbol across a cue boundary (e.g. "45%" | "王", "的" | "509.6"). In a source that contains CJK
+    # text, every cue boundary joins with no separator (e.g. "%" | "3"), since its cues carry none.
+    join_all = CJK_ONE.search(source_text) is not None
     for reason, _, bodies in scopes:
-        if norm_quote in common.normalize_quote_text(_join_cue_bodies(bodies)):
+        if norm_quote in common.normalize_quote_text(_join_cue_bodies(bodies, join_all)):
             return True, reason + "_cjk_boundary_join"
     return False, "quote_not_found_in_source"
 

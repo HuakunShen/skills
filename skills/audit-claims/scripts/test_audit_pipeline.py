@@ -65,6 +65,18 @@ class VerifyQuoteTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(basis, "quote_not_found_in_source")
 
+    def test_symbol_then_digit_across_cue_boundary_in_cjk_transcript_matches(self):
+        source = cue_text("增长率为45%", "3个百分点")
+        ok, basis = pipeline._verify_quote_in_source(source, {"unit_id": "cue-000001"}, "增长率为45%3个百分点")
+        self.assertTrue(ok)
+        self.assertEqual(basis, "matched_locator_unit_cjk_boundary_join")
+
+    def test_symbol_then_digit_across_cue_boundary_in_non_cjk_source_is_still_rejected(self):
+        source = cue_text("Growth was 45%", "3 points")
+        ok, basis = pipeline._verify_quote_in_source(source, {"unit_id": "cue-000001"}, "Growth was 45%3 points")
+        self.assertFalse(ok)
+        self.assertEqual(basis, "quote_not_found_in_source")
+
     def test_digit_latin_cross_cue_quote_without_space_is_still_rejected(self):
         source = cue_text("2026", "years")
         ok, basis = pipeline._verify_quote_in_source(source, {"unit_id": "cue-000001"}, "2026years")

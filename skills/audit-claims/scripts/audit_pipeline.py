@@ -242,11 +242,18 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1", *,
         return res
 
 
+# CJK ideographs, kana, Hangul, CJK punctuation and fullwidth forms.
+CJK_CHAR = r"[　-〿぀-ヿ㐀-䶿一-鿿가-힯豈-﫿＀-￯]"
+CJK_GAP = re.compile(rf"(?<={CJK_CHAR})\s+(?={CJK_CHAR})")
+
+
 def _verify_quote_in_source(source_text, locator, quote):
     norm_quote = common.normalize_quote_text(quote)
     if not norm_quote:
         return False, "empty_quote"
     _, units = _extract_frontmatter_and_units(source_text)
+    # Candidate haystacks in priority order: locator windows first, then the whole source.
+    candidates = []
     if isinstance(locator, dict):
         uid = locator.get("unit_id") or locator.get("id")
         start_u = locator.get("start_unit") or uid
@@ -259,16 +266,22 @@ def _verify_quote_in_source(source_text, locator, quote):
                 if i1 < i0:
                     i0, i1 = i1, i0
                 window = " ".join(u["body"] for u in units[max(0, i0 - 1) : min(len(units), i1 + 2)])
-                if norm_quote in common.normalize_quote_text(window):
-                    return True, "matched_locator_unit"
+                candidates.append(("matched_locator_unit", window))
         if locator.get("kind") == "paragraph" and isinstance(locator.get("start"), int):
             p_start = max(1, locator["start"])
             p_end = max(p_start, locator.get("end") or p_start)
             p_slice = units[max(0, p_start - 1) : min(len(units), p_end)]
-            if norm_quote in common.normalize_quote_text(" ".join(u["body"] for u in p_slice)):
-                return True, "matched_paragraph_range"
-    if norm_quote in common.normalize_quote_text(source_text):
-        return True, "matched_source_fallback"
+            candidates.append(("matched_paragraph_range", " ".join(u["body"] for u in p_slice)))
+    candidates.append(("matched_source_fallback", source_text))
+    # Verbatim matches always win. The CJK fallback only drops whitespace sitting between two CJK
+    # characters (cue boundaries in CJK transcripts carry no space), so it stays strict otherwise.
+    for reason, text in candidates:
+        if norm_quote in common.normalize_quote_text(text):
+            return True, reason
+    cjk_quote = CJK_GAP.sub("", norm_quote)
+    for reason, text in candidates:
+        if cjk_quote in CJK_GAP.sub("", common.normalize_quote_text(text)):
+            return True, reason + "_cjk_join"
     return False, "quote_not_found_in_source"
 
 

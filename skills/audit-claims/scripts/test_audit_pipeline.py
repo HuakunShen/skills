@@ -35,6 +35,42 @@ class VerifyQuoteTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(basis, "matched_paragraph_range_cjk_join")
 
+    def test_cjk_then_percent_across_cue_boundary_matches(self):
+        source = cue_text("上涨了45%", "王某表示")
+        ok, basis = pipeline._verify_quote_in_source(source, {"unit_id": "cue-000001"}, "上涨了45%王某表示")
+        self.assertTrue(ok)
+        self.assertEqual(basis, "matched_locator_unit_cjk_boundary_join")
+
+    def test_cjk_then_digits_across_cue_boundary_matches(self):
+        source = cue_text("增长到的", "509.6亿元")
+        ok, basis = pipeline._verify_quote_in_source(source, {"unit_id": "cue-000001"}, "增长到的509.6亿元")
+        self.assertTrue(ok)
+        self.assertEqual(basis, "matched_locator_unit_cjk_boundary_join")
+
+    def test_digit_then_cjk_across_cue_boundary_matches(self):
+        source = cue_text("共计2026", "年的数据")
+        ok, basis = pipeline._verify_quote_in_source(source, {"unit_id": "cue-000001"}, "共计2026年的数据")
+        self.assertTrue(ok)
+        self.assertEqual(basis, "matched_locator_unit_cjk_boundary_join")
+
+    def test_cjk_boundary_join_works_through_source_fallback(self):
+        source = cue_text("业绩下滑12%", "之后回升")
+        ok, basis = pipeline._verify_quote_in_source(source, None, "业绩下滑12%之后回升")
+        self.assertTrue(ok)
+        self.assertEqual(basis, "matched_source_fallback_cjk_boundary_join")
+
+    def test_cjk_boundary_join_stays_verbatim_on_characters(self):
+        source = cue_text("上涨了45%", "王某表示")
+        ok, basis = pipeline._verify_quote_in_source(source, {"unit_id": "cue-000001"}, "上涨了46%王某表示")
+        self.assertFalse(ok)
+        self.assertEqual(basis, "quote_not_found_in_source")
+
+    def test_digit_latin_cross_cue_quote_without_space_is_still_rejected(self):
+        source = cue_text("2026", "years")
+        ok, basis = pipeline._verify_quote_in_source(source, {"unit_id": "cue-000001"}, "2026years")
+        self.assertFalse(ok)
+        self.assertEqual(basis, "quote_not_found_in_source")
+
     def test_verbatim_space_joined_match_still_reports_plain_basis(self):
         source = cue_text("我们讨论", "Python 问题")
         ok, basis = pipeline._verify_quote_in_source(source, {"unit_id": "cue-000001"}, "我们讨论 Python 问题")

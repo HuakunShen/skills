@@ -245,6 +245,20 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1", *,
 # CJK ideographs, kana, Hangul, CJK punctuation and fullwidth forms.
 CJK_CHAR = r"[　-〿぀-ヿ㐀-䶿一-鿿가-힯豈-﫿＀-￯]"
 CJK_GAP = re.compile(rf"(?<={CJK_CHAR})\s+(?={CJK_CHAR})")
+CJK_ONE = re.compile(CJK_CHAR)
+
+
+def _join_cue_bodies(bodies):
+    """Join cue bodies with no separator where a CJK character touches the boundary, else with a space."""
+    out = ""
+    for body in bodies:
+        part = body.strip()
+        if not part:
+            continue
+        if out and not (CJK_ONE.match(out[-1]) or CJK_ONE.match(part[0])):
+            out += " "
+        out += part
+    return out
 
 
 def _verify_quote_in_source(source_text, locator, quote):
@@ -252,8 +266,9 @@ def _verify_quote_in_source(source_text, locator, quote):
     if not norm_quote:
         return False, "empty_quote"
     _, units = _extract_frontmatter_and_units(source_text)
-    # Candidate haystacks in priority order: locator windows first, then the whole source.
-    candidates = []
+    # Candidate scopes in priority order: locator windows first, then the whole source.
+    # Each scope carries its verbatim text and its cue bodies, for boundary-aware joining.
+    scopes = []
     if isinstance(locator, dict):
         uid = locator.get("unit_id") or locator.get("id")
         start_u = locator.get("start_unit") or uid
@@ -265,23 +280,29 @@ def _verify_quote_in_source(source_text, locator, quote):
                 i1 = id_to_idx.get(end_u, i0)
                 if i1 < i0:
                     i0, i1 = i1, i0
-                window = " ".join(u["body"] for u in units[max(0, i0 - 1) : min(len(units), i1 + 2)])
-                candidates.append(("matched_locator_unit", window))
+                bodies = [u["body"] for u in units[max(0, i0 - 1) : min(len(units), i1 + 2)]]
+                scopes.append(("matched_locator_unit", " ".join(bodies), bodies))
         if locator.get("kind") == "paragraph" and isinstance(locator.get("start"), int):
             p_start = max(1, locator["start"])
             p_end = max(p_start, locator.get("end") or p_start)
-            p_slice = units[max(0, p_start - 1) : min(len(units), p_end)]
-            candidates.append(("matched_paragraph_range", " ".join(u["body"] for u in p_slice)))
-    candidates.append(("matched_source_fallback", source_text))
-    # Verbatim matches always win. The CJK fallback only drops whitespace sitting between two CJK
-    # characters (cue boundaries in CJK transcripts carry no space), so it stays strict otherwise.
-    for reason, text in candidates:
+            bodies = [u["body"] for u in units[max(0, p_start - 1) : min(len(units), p_end)]]
+            scopes.append(("matched_paragraph_range", " ".join(bodies), bodies))
+    scopes.append(("matched_source_fallback", source_text, [u["body"] for u in units]))
+    # Verbatim matches always win. The next two tiers only relax the separator at cue boundaries
+    # in CJK text (cue bodies carry no separator there); all other character matching stays exact.
+    for reason, text, _ in scopes:
         if norm_quote in common.normalize_quote_text(text):
             return True, reason
+    # Tier 2: drop whitespace sitting between two CJK characters.
     cjk_quote = CJK_GAP.sub("", norm_quote)
-    for reason, text in candidates:
+    for reason, text, _ in scopes:
         if cjk_quote in CJK_GAP.sub("", common.normalize_quote_text(text)):
             return True, reason + "_cjk_join"
+    # Tier 3: join cue bodies with an empty string where a CJK character meets a digit, Latin, or
+    # symbol across a cue boundary (e.g. "45%" | "王", "的" | "509.6").
+    for reason, _, bodies in scopes:
+        if norm_quote in common.normalize_quote_text(_join_cue_bodies(bodies)):
+            return True, reason + "_cjk_boundary_join"
     return False, "quote_not_found_in_source"
 
 

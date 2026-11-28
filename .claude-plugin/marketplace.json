@@ -75,12 +75,13 @@
     },
     {
       "name": "video-production",
-      "description": "Create narrated videos and animated concept explainers",
+      "description": "Create narrated videos, animated concept explainers, and distill a YouTuber's complete style from transcripts and video",
       "source": "./",
       "strict": false,
       "skills": [
         "./skills/video-production/slidev-narrated-video",
-        "./skills/video-production/animated-concept-explainer"
+        "./skills/video-production/animated-concept-explainer",
+        "./skills/video-production/youtube-style-distiller"
       ]
     }
   ]

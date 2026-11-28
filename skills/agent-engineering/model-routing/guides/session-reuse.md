@@ -15,6 +15,16 @@ A fresh worker re-reads the repo, the brief and earlier reports. When a later ta
 
 Never resume into a different workspace than the session ran in. Confirm the session id belongs to the right lane first.
 
+## Review loops: default to resume (owner, 2026-11-20)
+
+Measured on Browser Control T1 (kunkun-v2.1): 24 gate rounds, each with two fresh gpt-6.2-sol/high sessions that re-read the whole code and spec. Cost was high and it never converged, because every fresh reviewer is a new attacker and finds a new class of issue. Rules:
+
+- **Round 1 of a change: fresh** reviewer. **Fix-verification rounds: resume the same session**, one reviewer, message = "the fix diff for F1..Fn; verify each is really fixed, then attack only what the fixes touched". Effort medium is enough.
+- **Final gate: one fresh reviewer, once**, after the resumed rounds report no P1 and no authority/lifecycle/privacy P2. Do not start another fresh round after a failed gate; resume the gate reviewer to check the fixes.
+- Save the session id of every review right after launch (`session id:` line in the log) in a SESSIONS file next to the review outputs.
+- One reviewer per round, not two, unless the change touches two unrelated surfaces (code vs spec); then one resumed session per surface.
+- If the reviewer keeps finding new classes in untouched areas, that is scope creep, not convergence: record non-blocking items as deferrals and end the loop; blocking (P0/P1, authority/lifecycle/privacy/data-loss P2) items continue in as many resumed rounds as needed (owner 2026-11-20, no fixed cap); owner-only questions go to the project's pending file and work continues.
+
 ## Mechanics
 
 - **Claude subagent:** keep the returned agent id and send a follow-up with `SendMessage` (`to: <agent id>`). A finished agent is resumed that way; do not spawn a duplicate.

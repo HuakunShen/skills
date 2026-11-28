@@ -53,3 +53,22 @@ still reads enough current source to judge the claims independently. A prior PAS
 applies only to its recorded scope and version. Extend review when later changes
 affect those conclusions, and review the combined diff when integration introduces
 behavior that individual lane reviews did not cover.
+
+## Re-review rounds resume the reviewer (owner, 2026-11-20)
+
+First review of a change is fresh; fix-verification rounds resume the same reviewer session (one reviewer, medium effort, fix diff only); one fresh reviewer for the final gate. Fresh reviewers every round never converge and cost the most. Rules, numbers and the stop condition: the `model-routing` skill, `guides/session-reuse.md`, section "Review loops".
+
+## Equivalence tables for "behaviour unchanged" claims (owner, 2026-11-25)
+
+When a refactor or move is argued with a table ("old code ↔ new code, behaviour unchanged"), the table counts as evidence only if it has all of:
+
+1. **Short-circuit conditions**: for each judgment, when it does *not* read the state (trust, store, network) and when it returns early. Refactors most often break here.
+2. **Public contract column**: whether the signature, the binding between parameters, the trait's method count, or `dyn`/generic return types changed. An unchanged function body does not mean an unchanged contract.
+3. **Line numbers taken at tip** (`git show <sha>:path`), or function names only. Stale coordinates are navigation hints, not evidence.
+4. **A scope statement**: "this table proves X; it does not prove Y". Without one, reviewers read it as full coverage.
+
+Why: xross tsk_crossflow_sync_extract PR #29. The inventory and equivalence tables were accurate as a policy map and as body equivalence, but they missed every short-circuit and the one real bug. The function bodies were unchanged, but the new public verifiers took `document` and `creator` as two independent inputs, so the two were no longer bound together. sol found this; the tables could not have shown it.
+
+Title such PRs "function bodies moved unchanged, public boundary narrowed", not "pure move". In #29 both must-fix findings were at the public boundary (the signatures), not in the moved bodies, and the title must not tell reviewers they can skip the signatures.
+
+Lesson (xross #29, 2026-11-25): when a must-fix is about a library guarantee ("this verifier only accepts X"), do not fix it by asking callers to supply the right thing: a value, a parser, or a one-caller rule enforced by a source scan. Make the library choose for itself. Two rounds of caller-supplied fixes kept the P2 open; moving the grammar to where the library could reach it closed it in one round.

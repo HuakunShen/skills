@@ -1,0 +1,17 @@
+{
+  "_doc": "Generic sponsor / promo / call-to-action patterns (case-insensitive regex). Extend per project with --ad-patterns; never hard-code a creator's own sponsor names here.",
+  "patterns": [
+    "\\bsponsor(ed|s|ship)?\\b",
+    "\\bpromo(tion)?\\s*code\\b",
+    "\\buse code\\b",
+    "\\baffiliate\\b",
+    "\\blink (is )?in (the )?(description|bio)\\b",
+    "\\bthis video is (brought|made) (to you )?by\\b",
+    "\\bsubscribe (now|and hit)\\b",
+    "赞助",
+    "优惠码",
+    "专属链接",
+    "本期视频由",
+    "概不接受.{0,8}推广"
+  ]
+}

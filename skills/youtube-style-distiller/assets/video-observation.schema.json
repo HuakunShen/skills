@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoObservation",
+  "description": "One multimodal observation of a sampled video. Every item carries a timestamp range.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["video_id", "duration_s", "observations"],
+  "properties": {
+    "video_id": {"type": "string", "minLength": 1},
+    "duration_s": {"type": "number", "minimum": 0},
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {"type": "string"},
+        "resolution": {"type": "string"},
+        "effort": {"type": "string", "enum": ["low", "medium", "high"]}
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dimension", "start", "end", "description"],
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": ["intro", "outro", "layout", "camera", "broll", "motion_graphics",
+                     "subtitles", "typography", "pacing", "audio_bgm", "audio_sfx", "other"]
+          },
+          "start": {"type": "string", "pattern": "^\\d{1,2}:\\d{2}(:\\d{2})?$"},
+          "end": {"type": "string", "pattern": "^\\d{1,2}:\\d{2}(:\\d{2})?$"},
+          "description": {"type": "string", "minLength": 1},
+          "attributes": {"type": "object"}
+        }
+      }
+    }
+  }
+}

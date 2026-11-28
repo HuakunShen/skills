@@ -18,6 +18,68 @@ SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 TIMING = re.compile(r"^\s*((?:\d+:)?\d{2}:\d{2}(?:[.,]\d{1,3})?)\s+-->\s+((?:\d+:)?\d{2}:\d{2}(?:[.,]\d{1,3})?)(?:\s+.*)?$")
 VTT_INLINE_TAG = re.compile(r"</?(?:c(?:\.[^>\s]+)?|\d{2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?|b|i|u|v(?:\s+[^>]*)?|lang(?:\s+[^>]*)?)>", re.IGNORECASE)
 SPOOFED_LOCATOR = re.compile(r"<!--\s*audit-claims-locator:|^\[#(?:p|cue)-\d{6}[^\]]*\]", re.MULTILINE)
+STT_NORM_STRIP = re.compile(r"[\s\.,!?，。！？、；;：:…~\-—\"'“”‘’()（）\[\]【】]+")
+STT_REPEAT_MIN_RUN = 5
+STT_SHORT_CUE_MAX_CHARS = 40
+
+
+def detect_stt_quality_issues(cues, media_duration_seconds=None):
+    """Detect Whisper/STT tail-hallucination loops and duration overflow without dropping raw cues."""
+    flags = []
+    diagnostics = {}
+    if not cues:
+        return flags, diagnostics
+    repeated_runs = []
+    idx = 0
+    total = len(cues)
+    while idx < total:
+        norm = STT_NORM_STRIP.sub("", str(cues[idx].get("text", "")).lower())
+        if not norm or len(norm) > STT_SHORT_CUE_MAX_CHARS:
+            idx += 1
+            continue
+        end = idx + 1
+        while end < total:
+            nxt = STT_NORM_STRIP.sub("", str(cues[end].get("text", "")).lower())
+            if nxt != norm:
+                break
+            end += 1
+        run_len = end - idx
+        if run_len >= STT_REPEAT_MIN_RUN:
+            at_tail = end == total
+            entry = {
+                "start_index": idx,
+                "end_index": end - 1,
+                "count": run_len,
+                "text": str(cues[idx].get("text", "")).strip(),
+                "at_tail": at_tail,
+            }
+            if "start_seconds" in cues[idx]:
+                entry["start_seconds"] = cues[idx]["start_seconds"]
+            if "end_seconds" in cues[end - 1]:
+                entry["end_seconds"] = cues[end - 1]["end_seconds"]
+            repeated_runs.append(entry)
+        idx = end
+    if repeated_runs:
+        diagnostics["repeated_short_cue_runs"] = repeated_runs
+        if any(r["at_tail"] for r in repeated_runs):
+            flags.append("stt_tail_hallucination")
+        if any(not r["at_tail"] for r in repeated_runs):
+            flags.append("stt_repeated_cue_hallucination")
+    if media_duration_seconds is not None:
+        overflow_cues = [
+            cue for cue in cues
+            if cue.get("end_seconds") is not None and cue["end_seconds"] > media_duration_seconds
+        ]
+        if overflow_cues:
+            max_end = max(cue["end_seconds"] for cue in overflow_cues)
+            flags.append("stt_duration_overflow")
+            diagnostics["duration_overflow"] = {
+                "overflow_cue_count": len(overflow_cues),
+                "max_end_seconds": round(max_end, 3),
+                "media_duration_seconds": media_duration_seconds,
+                "overflow_seconds": round(max_end - media_duration_seconds, 3),
+            }
+    return flags, diagnostics
 
 
 def sha(data):
@@ -118,19 +180,26 @@ def cue_body(cues, locator_mode="compact"):
 
 
 def subtitles(text, fmt, locator_mode="compact", clean_youtube_vtt=False):
-    lines = text.split("\n")
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     blocks, current, start = [], [], 0
     for index, line in enumerate(lines):
-        if line.strip():
+        # Per WebVTT spec, blocks are separated only by completely empty lines;
+        # real YouTube auto-VTT files emit whitespace-only lines (" ") inside cue payloads.
+        is_separator = (line == "") if fmt == "vtt" else (not line.strip())
+        if is_separator:
+            if current:
+                blocks.append((start, current))
+                current = []
+        elif not current and not line.strip():
+            continue
+        else:
             if not current:
                 start = index + 1
             current.append(line)
-        elif current:
-            blocks.append((start, current))
-            current = []
     if current:
         blocks.append((start, current))
     cues, skipped_empty = [], 0
+    prev_raw_lines = []
     if fmt == "vtt" and (not blocks or not blocks[0][1][0].startswith("WEBVTT")):
         raise ValueError("VTT input must have WEBVTT header")
     for block_number, (line_start, block) in enumerate(blocks):
@@ -146,25 +215,43 @@ def subtitles(text, fmt, locator_mode="compact", clean_youtube_vtt=False):
         if timing_index >= len(block) or not TIMING.match(block[timing_index]):
             raise ValueError(f"Malformed {fmt.upper()} cue near original line {line_start}")
         match = TIMING.match(block[timing_index])
-        cue_text = "\n".join(block[timing_index + 1:])
+        payload_lines = block[timing_index + 1:]
         if clean_youtube_vtt:
-            cue_text = VTT_INLINE_TAG.sub("", cue_text).strip()
-        if not cue_text.strip():
-            skipped_empty += 1
-            continue
+            cleaned_lines = [VTT_INLINE_TAG.sub("", line).strip() for line in payload_lines]
+            cleaned_lines = [line for line in cleaned_lines if line]
+            if not cleaned_lines:
+                skipped_empty += 1
+                continue
+        else:
+            cleaned_lines = [line for line in payload_lines if line.strip()]
+            if not cleaned_lines:
+                skipped_empty += 1
+                continue
         start_seconds, end_seconds = seconds(match.group(1)), seconds(match.group(2))
         if end_seconds < start_seconds:
             raise ValueError("Subtitle cue ends before it starts")
+        emitted_lines = cleaned_lines
+        if clean_youtube_vtt and cues and start_seconds <= cues[-1]["end_seconds"] + 1.0:
+            overlap = 0
+            for k in range(min(len(prev_raw_lines), len(cleaned_lines)), 0, -1):
+                if prev_raw_lines[-k:] == cleaned_lines[:k]:
+                    overlap = k
+                    break
+            if overlap == len(cleaned_lines):
+                cues[-1]["end_seconds"] = max(cues[-1]["end_seconds"], end_seconds)
+                cues[-1].setdefault("collapsed_cue_lines", [cues[-1]["original_line_start"]]).append(line_start)
+                prev_raw_lines = cleaned_lines
+                continue
+            if overlap > 0:
+                emitted_lines = cleaned_lines[overlap:]
+        cue_text = "\n".join(emitted_lines)
         entry = {"text": cue_text, "original_id": block[0] if timing_index else None,
                  "original_line_start": line_start, "original_line_end": line_start + len(block) - 1,
                  "start_seconds": start_seconds, "end_seconds": end_seconds}
-        if clean_youtube_vtt and cues and cues[-1]["text"] == cue_text and start_seconds <= cues[-1]["end_seconds"] + 1.0:
-            cues[-1]["end_seconds"] = max(cues[-1]["end_seconds"], end_seconds)
-            cues[-1].setdefault("collapsed_cue_lines", [cues[-1]["original_line_start"]]).append(line_start)
-            continue
         cues.append(entry)
+        prev_raw_lines = cleaned_lines
     body, kind, count, locators = cue_body(cues, locator_mode=locator_mode)
-    return body, kind, count, locators, skipped_empty
+    return body, kind, count, locators, skipped_empty, cues
 
 
 def json_transcript(text, locator_mode="compact"):
@@ -184,7 +271,7 @@ def json_transcript(text, locator_mode="compact"):
             segments, prefix = value["segments"], prefix + ".segments"
         elif isinstance(full_text, str) and full_text.strip():
             body, kind, count, locators = paragraphs(full_text, locator_mode=locator_mode)
-            return body, kind, count, locators, 0
+            return body, kind, count, locators, 0, []
         else:
             raise ValueError("Unrecognized/empty transcript JSON; expected text or segments")
     elif isinstance(value, list) and value:
@@ -226,7 +313,48 @@ def json_transcript(text, locator_mode="compact"):
     if full_text and "".join(full_text.split()) != "".join("".join(cue["text"].split()) for cue in cues):
         raise ValueError("JSON text disagrees with segments; resolve alignment before normalization")
     body, kind, count, locators = cue_body(cues, locator_mode=locator_mode)
-    return body, kind, count, locators, skipped_empty
+    return body, kind, count, locators, skipped_empty, cues
+
+
+def source_description(record, sid, manifest_dir):
+    """Uploader-written description from the manifest `description` or a yt-dlp `info_json` file.
+
+    Returns (text, origin) or (None, None). Descriptions are written text, not speech, so the caller
+    keeps them in a separate paragraph that extraction must cite with its own locator.
+    """
+    if record.get("description") is not None:
+        value, origin = record["description"], "manifest"
+    elif record.get("info_json") is not None:
+        value, origin = None, "info_json"
+        info_path = manifest_path(record["info_json"], sid, manifest_dir, "info_json")
+        if not info_path.is_file():
+            raise ValueError(f"Source {sid} info_json file is missing")
+        if info_path.stat().st_size > 16 * 1024 * 1024:
+            raise ValueError(f"Source {sid} info_json exceeds 16 MiB; pass description in the manifest instead")
+        info = json.loads(info_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(info, dict):
+            raise ValueError(f"Source {sid} info_json must contain an object")
+        value = info.get("description")
+    else:
+        return None, None
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        raise ValueError(f"Source {sid} description must be a string or null")
+    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return (text or None), origin
+
+
+def manifest_path(value, sid, manifest_dir, label):
+    """Resolve a manifest-relative path; refuse absolute paths and anything outside the manifest directory."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Source {sid} {label} must be a relative path string")
+    manifest_root = Path(manifest_dir).resolve()
+    path = Path(value)
+    resolved = (manifest_root / path).resolve()
+    if path.is_absolute() or not resolved.is_relative_to(manifest_root):
+        raise ValueError(f"Source {sid} {label} must remain under the manifest directory")
+    return resolved
 
 
 def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact", clean_youtube_vtt=False):
@@ -272,13 +400,43 @@ def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact",
     if not isinstance(method, str) or not method:
         raise ValueError(f"Source {sid} transcript_method must be a nonempty string")
     skipped_empty = 0
+    cues = []
     if fmt in {"txt", "md"}:
         body, locator_kind, locator_count, locators = paragraphs(text, locator_mode=locator_mode)
     elif fmt in {"srt", "vtt"}:
-        body, locator_kind, locator_count, locators, skipped_empty = subtitles(
+        body, locator_kind, locator_count, locators, skipped_empty, cues = subtitles(
             text, fmt, locator_mode=locator_mode, clean_youtube_vtt=clean_youtube_vtt)
     else:
-        body, locator_kind, locator_count, locators, skipped_empty = json_transcript(text, locator_mode=locator_mode)
+        body, locator_kind, locator_count, locators, skipped_empty, cues = json_transcript(text, locator_mode=locator_mode)
+    description, description_origin = source_description(record, sid, manifest_dir)
+    description_locator = None
+    if description:
+        description, _ = sanitize_body_text(description)
+        # Paragraph-kind locator so extraction can cite it like any paragraph; the heading makes it clear
+        # the words were written by the uploader and were not spoken in the video.
+        description_locator = {"id": f"p-{locator_count + 1:06d}", "kind": "paragraph",
+                               "original_line_start": None, "original_line_end": None, "origin": "video_description"}
+        body = (body.rstrip("\n") + "\n\n" + compact_marker(description_locator)
+                + "Uploader description (written text, not spoken in the video):\n" + description + "\n")
+        locators = list(locators) + [description_locator]
+        locator_count += 1
+    transcription = record.get("transcription")
+    if transcription is not None and not isinstance(transcription, dict):
+        raise ValueError(f"Source {sid} transcription metadata must be an object or null")
+    media_duration = record.get("media_duration_seconds")
+    if media_duration is None and isinstance(transcription, dict):
+        media_duration = transcription.get("media_duration_seconds")
+    if media_duration is None:
+        media_duration = record.get("duration_seconds")
+    if media_duration is not None:
+        media_duration = finite_number(media_duration, f"media_duration_seconds for {sid}")
+    provided_flags = record.get("quality_flags")
+    if provided_flags is not None:
+        if not isinstance(provided_flags, list) or any(not isinstance(f, str) or not f.strip() for f in provided_flags):
+            raise ValueError(f"Source {sid} quality_flags must be a list of nonempty strings or null")
+        provided_flags = [f.strip() for f in provided_flags]
+    detected_flags, stt_diagnostics = detect_stt_quality_issues(cues, media_duration_seconds=media_duration)
+    merged_flags = list(dict.fromkeys((provided_flags or []) + detected_flags))
     speakers_observed = sorted({loc["speaker"] for loc in locators if loc.get("speaker")})
     metadata = {"source_id": sid, "title": title, "source_url": url, "published_at": published,
                 "language": language, "transcript_method": method, "format": fmt,
@@ -288,13 +446,27 @@ def normalize(record, manifest_dir, run, cfg, max_bytes, locator_mode="compact",
         metadata["speakers"] = record["speakers"]
     if speakers_observed:
         metadata["speakers_observed"] = speakers_observed
+    if media_duration is not None:
+        metadata["media_duration_seconds"] = media_duration
+    if transcription is not None:
+        metadata["transcription"] = transcription
+    if description_locator is not None:
+        metadata["description_origin"] = description_origin
+        metadata["description_locator_id"] = description_locator["id"]
+        metadata["description_sha256"] = __import__("hashlib").sha256(description.encode("utf-8")).hexdigest()
+    if merged_flags or provided_flags is not None:
+        metadata["quality_flags"] = merged_flags
     fingerprint = ledger.digest(metadata)
     frontmatter = "---\n" + "".join(f"{key}: {json.dumps(value, ensure_ascii=False)}\n" for key, value in metadata.items()) + "---\n\n"
     normalized = (frontmatter + body).encode("utf-8")
-    sidecar = json.dumps({"schema_version": 1, "source_id": sid, "locator_kind": locator_kind,
-                          "locators": locators, "skipped_empty_cues": skipped_empty,
-                          "bidi_controls_stripped": bidi_removed},
-                         ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+    sidecar_obj = {"schema_version": 1, "source_id": sid, "locator_kind": locator_kind,
+                   "locators": locators, "skipped_empty_cues": skipped_empty,
+                   "bidi_controls_stripped": bidi_removed}
+    if merged_flags:
+        sidecar_obj["quality_flags"] = merged_flags
+    if stt_diagnostics:
+        sidecar_obj["stt_quality_diagnostics"] = stt_diagnostics
+    sidecar = json.dumps(sidecar_obj, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
     row = {**metadata, "status": "ready", "content_path": f"sources/{sid}.md",
            "locators_path": f"sources/{sid}.locators.json",
            "content_hash": __import__("hashlib").sha256(normalized).hexdigest(),
@@ -376,10 +548,15 @@ def ingest(args):
             ledger.write_jsonl(run / "sources.jsonl", list(merged.values()))
             ledger.event(run, "sources_normalized", source_ids=[item[0]["source_id"] for item in changed], append=allow_append)
             ledger.progress(run)
-        return {"normalized": len(changed), "unchanged": len(prepared) - len(changed),
-                "source_ids": [item[0]["source_id"] for item in prepared],
-                "inventory_sources": len(existing_rows) + sum(item[0]["source_id"] not in existing for item in changed),
-                "network_calls": 0}
+        flagged = [{"source_id": item[0]["source_id"], "quality_flags": item[0]["quality_flags"]}
+                   for item in prepared if item[0].get("quality_flags")]
+        res = {"normalized": len(changed), "unchanged": len(prepared) - len(changed),
+               "source_ids": [item[0]["source_id"] for item in prepared],
+               "inventory_sources": len(existing_rows) + sum(item[0]["source_id"] not in existing for item in changed),
+               "network_calls": 0}
+        if flagged:
+            res["flagged_sources"] = flagged
+        return res
 
 
 def atomic_bytes(path, data):

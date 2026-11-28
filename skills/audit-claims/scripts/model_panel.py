@@ -37,7 +37,10 @@ def read_json(path):
 
 
 def read_rows(path):
-    return common.read_jsonl(path)
+    try:
+        return common.read_jsonl(path)
+    except ValueError as exc:
+        raise ValueError(f"{exc} (expected JSONL: one JSON object per line, not a JSON array)") from exc
 
 
 def atomic_text(path, text):
@@ -330,6 +333,36 @@ def summarize(policy, reviews):
             "score_truth_verified": False}
 
 
+def subjective_attribution(policy, reviews, dimension_ids, judge=None):
+    """Per-dimension rubric scores tied to the exact evaluator model(s) that produced them.
+
+    Average is reported only when more than one model scored the dimension; the judge is listed
+    for attribution but never enters the reviewer average.
+    """
+    models = {m["id"]: m for m in (policy or {}).get("selected_models", []) if isinstance(m, dict) and m.get("id")}
+    rows_all = [(r, "reviewer") for r in reviews]
+    if isinstance(judge, dict) and judge.get("status") == "completed":
+        rows_all.append((judge, "judge"))
+    result = {}
+    for dim in dimension_ids:
+        rows = []
+        for review, role in rows_all:
+            model = models.get(review.get("model_id"), {})
+            value = (review.get("scores") or {}).get(dim) if review.get("status") == "completed" else None
+            rows.append({"model_id": review.get("model_id"), "display_name": model.get("display_name") or review.get("model_id"),
+                         "provider": model.get("provider"), "api_model": model.get("api_model"), "role": role,
+                         "status": review.get("status"), "score": value})
+        numeric = [r["score"] for r in rows if r["role"] == "reviewer" and r["score"] is not None]
+        result[dim] = {
+            "rubric_models": rows,
+            "scored_models": len(numeric),
+            "average_score": round(statistics.mean(numeric), 3) if len(numeric) > 1 else None,
+            "average_scope": "reviewers_only_when_multiple_models",
+            "subjective": True,
+        }
+    return result
+
+
 def validate_vote(row):
     if any(not nonempty(row.get(k)) for k in ("vote_id", "reviewer_id", *TASK_IDENTITY)):
         raise ValueError("Each vote requires identity, criteria, input and as_of bindings")
@@ -464,16 +497,16 @@ def parser():
     for name in ("init", "validate", "freeze"):
         command = sub.add_parser(name)
         command.add_argument("--run", required=True)
-    report = sub.add_parser("summarize")
-    report.add_argument("--policy", required=True)
-    report.add_argument("--reviews", required=True)
-    report.add_argument("--out", required=True)
-    fact = sub.add_parser("consensus")
-    fact.add_argument("--policy", required=True)
-    fact.add_argument("--votes", required=True)
-    fact.add_argument("--decision")
-    fact.add_argument("--allow-indeterminate", action="store_true")
-    fact.add_argument("--out", required=True)
+    report = sub.add_parser("summarize", help="Summarize independent qualitative model reviews from a JSONL file")
+    report.add_argument("--policy", required=True, help="Path to frozen model-policy.json")
+    report.add_argument("--reviews", required=True, help="JSONL file (one review JSON object per line, NOT a JSON array)")
+    report.add_argument("--out", required=True, help="Output JSON path for panel summary")
+    fact = sub.add_parser("consensus", help="Compute verification consensus from a JSONL votes file")
+    fact.add_argument("--policy", required=True, help="Path to frozen model-policy.json")
+    fact.add_argument("--votes", required=True, help="JSONL file (one vote JSON object per line, NOT a JSON array)")
+    fact.add_argument("--decision", help="Optional JSON file containing a judge or human decision object")
+    fact.add_argument("--allow-indeterminate", action="store_true", help="Allow terminal indeterminate consensus")
+    fact.add_argument("--out", required=True, help="Output JSON path for consensus result")
     return p
 
 

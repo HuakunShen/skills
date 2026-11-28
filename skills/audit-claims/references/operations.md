@@ -31,7 +31,7 @@ python3 scripts/audit_run.py init \
   --cutoff-mode retrospective
 ```
 
-日期范围按指定时区的发布日期**两端包含**；`--as-of YYYY-MM-DD` 表示当地当天最后一个微秒。精确时刻须包含 UTC offset，例如 `2026-11-25T12:00:00+08:00`；拒绝没有时区的 datetime。精确截止时刻当天、只有日期而没有发布时间的来源不擅自假定早于截止时刻，标为 `publication_time_unknown_at_cutoff`。
+日期范围按指定时区的发布日期**两端包含**；历史日期的 `--as-of YYYY-MM-DD` 表示当地当天最后一个微秒，**当日**日期 `--as-of YYYY-MM-DD` 自动钳制为当前墙钟时刻（避免因 23:59:59 超前而触发未来截点报错）。精确时刻须包含 UTC offset，例如 `2026-11-25T12:00:00+08:00`；拒绝没有时区的 datetime。精确截止时刻当天、只有日期而没有发布时间的来源不擅自假定早于截止时刻，标为 `publication_time_unknown_at_cutoff`。
 
 `cutoff_mode=retrospective` 表示以固定的结果截止日回溯核验，可使用后来发布的证据说明截止日前发生的事实；`knowledge_as_of` 则要求证据本身在截止时刻已公开可得。脚本只记录该策略，核验 Agent 必须执行。
 
@@ -70,10 +70,13 @@ python3 scripts/audit_run.py plan-batches \
 
 完成批量提取后，运行确定性合并与统计胶水命令，避免手工重写账本：
 - `audit_run.py merge-extraction --run <RUN>`：合并已完成 shard，机械验证每条 `original_quote` 存在于对应源文件及 locator 区间内，未命中者标 `needs_review`。
-- `audit_run.py freeze-criteria --run <RUN> --claim-id <ID> --definition <JSON>`：生成规范 SHA-256 与服务端冻结时间戳并保存 `criteria/<sha>.json`。
+- `audit_run.py freeze-criteria --run <RUN> --claim-id <ID> --definition <JSON> [--difficulty trivial|moderate|hard|non_consensus] [--difficulty-score 1..5] [--difficulty-rationale "..."] [--difficulty-model-id <MODEL>]`：生成规范 SHA-256 与服务端冻结时间戳并保存 `criteria/<sha>.json`，强制校验预测 `window_end > first_stated_at / published_at` 并在查结果前可选冻结难度评级；`--difficulty-model-id` 记录给出评级的模型，报告按模型归属主观难度。
+- `adopt_verdict.py set-evidence-quality --run <RUN> --claim-id <ID> --directness <0|0.5|1> --independence <0|0.5|1> --traceability <0|0.5|1>`：在 `adopt` 之前写入证据质量评分，无需手工编辑 `claims.jsonl`。
+- `adopt_verdict.py mark-trigger-unmet --run <RUN> --claim-id <ID> --evidence-ids <EID...>`：冻结规则并查证后若条件预测触发器未满足，关联触发证据并记录 `lifecycle="pending"`、`due_for_assessment=false`、`reason="trigger_unmet"`（保留历史快照）。
 - `audit_run.py coverage --run <RUN>`：从 `sources.jsonl`、`plan.json`、`tasks.jsonl` 确定性回卷父来源统计并生成 `coverage.json`。
 - `audit_run.py handoff-export` / `handoff-import`：打包/校验外部 AI 任务包并写 `handoff/receipts.jsonl`。
-- `audit_run.py build-report-data --run <RUN>`：组装 `reports/report-data.json`。
+- `audit_run.py report-hashes --run <RUN> [--subject-id <SUBJECT>]`：在写入 `reviews/reports/*.json` 前输出精确 `data_hash` 与 `rubric_hash`。
+- `audit_run.py build-report-data --run <RUN> [--subject-id <SUBJECT>]`：组装 `reports/report-data.json`（多说话人运行可按 `--subject-id` 过滤，案例卡保留 `speaker` / `subject_id` / `endorsement` / `difficulty` / `lead_time_days`）。
 
 ## 提交结果与恢复
 

@@ -1,0 +1,22 @@
+{
+  "_doc": "Generic anti-AI-slop Never-say rules (regex, case-insensitive). Each rule carries a reason. Add speaker-specific bans in a copy of this file; keep the shipped list generic.",
+  "never_say": [
+    {"pattern": "\\bdelve(s|d)? into\\b", "reason": "generic LLM filler verb"},
+    {"pattern": "\\bin today'?s (fast-paced|ever-changing|digital) (world|landscape)\\b", "reason": "stock throat-clearing opener"},
+    {"pattern": "\\bit'?s important to note\\b", "reason": "hedge opener, say the thing"},
+    {"pattern": "\\blet'?s dive (in|into)\\b", "reason": "generic transition"},
+    {"pattern": "\\bgame[- ]changer\\b", "reason": "empty superlative"},
+    {"pattern": "\\bunlock the (power|potential)\\b", "reason": "marketing cliche"},
+    {"pattern": "\\bnavigate the (complex )?landscape\\b", "reason": "stock metaphor"},
+    {"pattern": "\\brealm of\\b", "reason": "stock metaphor"},
+    {"pattern": "\\bin conclusion,?\\b", "reason": "essay-form closer, not spoken style"},
+    {"pattern": "\\bseamless(ly)?\\b", "reason": "empty adjective"},
+    {"pattern": "\\bat the end of the day\\b", "reason": "filler cliche"},
+    {"pattern": "综上所述", "reason": "essay-form closer"},
+    {"pattern": "值得注意的是", "reason": "hedge opener"},
+    {"pattern": "在当今.{0,6}时代", "reason": "stock throat-clearing opener"},
+    {"pattern": "深入探讨", "reason": "stock verb"},
+    {"pattern": "赋能", "reason": "buzzword"},
+    {"pattern": "不仅.{0,20}更是", "reason": "formulaic contrast"}
+  ]
+}

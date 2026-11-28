@@ -17,6 +17,16 @@ from zoneinfo import ZoneInfo
 import _common as common
 
 UNIT_HEADER = re.compile(r"^(?:\[#((?:p|cue)-\d{6})[^\]]*\]|<!--\s*audit-claims-locator:\s*(\{.*?\})\s*-->)\n", re.MULTILINE)
+DEFAULT_RUBRIC_PATH = Path(__file__).resolve().parent.parent / "assets/evaluation-rubric.json"
+EXTRACTION_PROTECTED_CLAIM_FIELDS = frozenset({
+    "occurrences", "occurrence", "outcome", "resolved_at", "acceptance",
+    "evidence_ids", "evidence_quality", "evidence_exception",
+    "accountability_eligible", "due_for_assessment", "event_occurred",
+    "reopen_history", "quote_verified", "trigger_assessment",
+})
+OPTIONAL_OCCURRENCE_FIELDS = (
+    "technical_duplicate_of", "raw_locator", "normalized_locator", "transcript_uncertain", "cited_source_tier",
+)
 
 
 def _extract_frontmatter_and_units(text):
@@ -151,7 +161,8 @@ def bind_policy(ledger, run, model_policy_path=None, rules_json=None, allow_rebi
         return {"run_id": cfg["run_id"], "config_hash": cfg["config_hash"], "models": cfg["models"], "rules": cfg["rules"]}
 
 
-def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
+def freeze_criteria(ledger, run, claim_id, definition_path, version="1", *,
+                    difficulty=None, difficulty_score=None, difficulty_rationale=None, difficulty_model_id=None):
     run = Path(run).resolve()
     definition = common.read_json(Path(definition_path))
     if not isinstance(definition, dict):
@@ -164,6 +175,14 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
         raise ValueError("Criteria target, predicate and timezone must be nonempty strings")
     if definition["resolution_basis"] not in {"explicit", "interpretation"}:
         raise ValueError("resolution_basis must be explicit or interpretation")
+    if difficulty is not None and difficulty not in common.DIFFICULTY_TIERS:
+        raise ValueError(f"difficulty must be one of {common.DIFFICULTY_TIERS}")
+    if difficulty_score is not None and (type(difficulty_score) is not int or not 1 <= difficulty_score <= 5):
+        raise ValueError("difficulty_score must be an integer from 1 to 5")
+    if difficulty_rationale is not None and not isinstance(difficulty_rationale, str):
+        raise ValueError("difficulty_rationale must be a string")
+    if difficulty_model_id is not None and not common.nonempty(difficulty_model_id):
+        raise ValueError("difficulty_model_id must be a nonempty model id when given")
     crit_zone = ZoneInfo(definition["timezone"])
     with ledger.coordinator_lock(run):
         cfg = ledger.config(run)
@@ -174,6 +193,22 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
         claim = by_id[claim_id]
         if claim.get("criteria") is not None:
             raise ValueError(f"Claim {claim_id} already has frozen criteria; use reopen for revisions")
+        end = definition.get("window_end")
+        lead_time_days = None
+        if claim.get("claim_type") == "prediction" and end:
+            occ_rows = ledger.read_jsonl(run / "occurrences.jsonl") if (run / "occurrences.jsonl").exists() else []
+            occ_by_id = {o["occurrence_id"]: o for o in occ_rows if isinstance(o, dict) and o.get("occurrence_id")}
+            src_rows = ledger.read_jsonl(run / "sources.jsonl") if (run / "sources.jsonl").exists() else []
+            src_by_id = {s["source_id"]: s for s in src_rows if isinstance(s, dict) and s.get("source_id")}
+            stated_at = common.earliest_stated_at(claim, occ_by_id, src_by_id, cfg["scope"]["timezone"])
+            if stated_at:
+                ok, lead_time_days, detail = common.check_prediction_temporal_order(
+                    stated_at, end, definition["timezone"]
+                )
+                if not ok:
+                    raise ValueError(
+                        f"Prediction {claim_id} violates temporal guard ({detail}); reclassify as factual or fix window_end"
+                    )
         sha = hashlib.sha256(common.canonical(definition).encode("utf-8")).hexdigest()
         frozen_at = common.now()
         criteria_obj = {"version": str(version), "frozen_at": frozen_at, "definition": definition, "sha256": sha}
@@ -181,12 +216,19 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
         snap_path = ledger.inside(run, snap_rel)
         if not snap_path.exists():
             common.write_json(snap_path, criteria_obj)
-        end = definition.get("window_end")
         as_of_dt = datetime.fromisoformat(cfg["scope"]["as_of"].replace("Z", "+00:00"))
         due = True if not end else ledger.as_of_time(end, crit_zone) <= as_of_dt
         if definition.get("condition") not in (None, "unconditional", "") and definition.get("trigger_state") in {"unmet", "unknown"}:
             due = False
         claim["criteria"] = criteria_obj
+        if difficulty is not None:
+            claim["difficulty"] = difficulty
+        if difficulty_score is not None:
+            claim["difficulty_score"] = difficulty_score
+        if difficulty_rationale is not None:
+            claim["difficulty_rationale"] = difficulty_rationale
+        if difficulty_model_id is not None:
+            claim["difficulty_model_id"] = difficulty_model_id
         claim["accountability_eligible"] = bool(claim.get("empirical")) and claim.get("verifiability") in {"verifiable", "conditional"}
         claim["operationalization_status"] = "operationalized" if claim["accountability_eligible"] else "not_operationalizable"
         claim["due_for_assessment"] = due if claim["accountability_eligible"] else False
@@ -194,7 +236,29 @@ def freeze_criteria(ledger, run, claim_id, definition_path, version="1"):
             claim["lifecycle"] = "ready" if claim["due_for_assessment"] else "pending"
         ledger.write_jsonl(run / "claims.jsonl", claims)
         ledger.event(run, "criteria_frozen", claim_id=claim_id, criteria_sha256=sha, frozen_at=frozen_at, due=claim["due_for_assessment"])
-        return {"claim_id": claim_id, "criteria_sha256": sha, "frozen_at": frozen_at, "due_for_assessment": claim["due_for_assessment"]}
+        res = {"claim_id": claim_id, "criteria_sha256": sha, "frozen_at": frozen_at, "due_for_assessment": claim["due_for_assessment"]}
+        if lead_time_days is not None:
+            res["lead_time_days"] = lead_time_days
+        return res
+
+
+# CJK ideographs, kana, Hangul, CJK punctuation and fullwidth forms.
+CJK_CHAR = r"[　-〿぀-ヿ㐀-䶿一-鿿가-힯豈-﫿＀-￯]"
+CJK_GAP = re.compile(rf"(?<={CJK_CHAR})\s+(?={CJK_CHAR})")
+CJK_ONE = re.compile(CJK_CHAR)
+
+
+def _join_cue_bodies(bodies, join_all_boundaries=False):
+    """Join cue bodies with no separator at CJK-touching boundaries (or all boundaries when asked), else with a space."""
+    out = ""
+    for body in bodies:
+        part = body.strip()
+        if not part:
+            continue
+        if out and not join_all_boundaries and not (CJK_ONE.match(out[-1]) or CJK_ONE.match(part[0])):
+            out += " "
+        out += part
+    return out
 
 
 def _verify_quote_in_source(source_text, locator, quote):
@@ -202,6 +266,9 @@ def _verify_quote_in_source(source_text, locator, quote):
     if not norm_quote:
         return False, "empty_quote"
     _, units = _extract_frontmatter_and_units(source_text)
+    # Candidate scopes in priority order: locator windows first, then the whole source.
+    # Each scope carries its verbatim text and its cue bodies, for boundary-aware joining.
+    scopes = []
     if isinstance(locator, dict):
         uid = locator.get("unit_id") or locator.get("id")
         start_u = locator.get("start_unit") or uid
@@ -213,17 +280,31 @@ def _verify_quote_in_source(source_text, locator, quote):
                 i1 = id_to_idx.get(end_u, i0)
                 if i1 < i0:
                     i0, i1 = i1, i0
-                window = " ".join(u["body"] for u in units[max(0, i0 - 1) : min(len(units), i1 + 2)])
-                if norm_quote in common.normalize_quote_text(window):
-                    return True, "matched_locator_unit"
+                bodies = [u["body"] for u in units[max(0, i0 - 1) : min(len(units), i1 + 2)]]
+                scopes.append(("matched_locator_unit", " ".join(bodies), bodies))
         if locator.get("kind") == "paragraph" and isinstance(locator.get("start"), int):
             p_start = max(1, locator["start"])
             p_end = max(p_start, locator.get("end") or p_start)
-            p_slice = units[max(0, p_start - 1) : min(len(units), p_end)]
-            if norm_quote in common.normalize_quote_text(" ".join(u["body"] for u in p_slice)):
-                return True, "matched_paragraph_range"
-    if norm_quote in common.normalize_quote_text(source_text):
-        return True, "matched_source_fallback"
+            bodies = [u["body"] for u in units[max(0, p_start - 1) : min(len(units), p_end)]]
+            scopes.append(("matched_paragraph_range", " ".join(bodies), bodies))
+    scopes.append(("matched_source_fallback", source_text, [u["body"] for u in units]))
+    # Verbatim matches always win. The next two tiers only relax the separator at cue boundaries
+    # in CJK text (cue bodies carry no separator there); all other character matching stays exact.
+    for reason, text, _ in scopes:
+        if norm_quote in common.normalize_quote_text(text):
+            return True, reason
+    # Tier 2: drop whitespace sitting between two CJK characters.
+    cjk_quote = CJK_GAP.sub("", norm_quote)
+    for reason, text, _ in scopes:
+        if cjk_quote in CJK_GAP.sub("", common.normalize_quote_text(text)):
+            return True, reason + "_cjk_join"
+    # Tier 3: join cue bodies with an empty string where a CJK character meets a digit, Latin, or
+    # symbol across a cue boundary (e.g. "45%" | "王", "的" | "509.6"). In a source that contains CJK
+    # text, every cue boundary joins with no separator (e.g. "%" | "3"), since its cues carry none.
+    join_all = CJK_ONE.search(source_text) is not None
+    for reason, _, bodies in scopes:
+        if norm_quote in common.normalize_quote_text(_join_cue_bodies(bodies, join_all)):
+            return True, reason + "_cjk_boundary_join"
     return False, "quote_not_found_in_source"
 
 
@@ -244,7 +325,7 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
         claims = ledger.read_jsonl(run / "claims.jsonl")
         claim_by_id = ledger.unique(claims, "claim_id", "claims")
         source_texts = {}
-        added_occ = added_claims = unverified_quotes = 0
+        added_occ = added_claims = unverified_quotes = temporal_warnings = 0
         for p in paths:
             shard = common.read_json(p)
             if shard.get("complete") is not True:
@@ -278,6 +359,12 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                             "language": raw_occ.get("language") or sources[sid].get("language") or "unknown",
                             "quote_verified": ok, "quote_match_basis": match_reason,
                         }
+                        for opt_key in OPTIONAL_OCCURRENCE_FIELDS:
+                            if opt_key in raw_occ and raw_occ[opt_key] is not None:
+                                occ_rec[opt_key] = raw_occ[opt_key]
+                        occ_tier = occ_rec.get("cited_source_tier")
+                        if occ_tier is not None and occ_tier not in common.SOURCE_TIER_WEIGHTS:
+                            raise ValueError(f"Occurrence {oid} has invalid cited_source_tier: {occ_tier!r}")
                         occ_by_id[oid] = occ_rec
                         occurrences.append(occ_rec)
                         added_occ += 1
@@ -289,6 +376,15 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                     if oid in occ_by_id and not occ_by_id[oid].get("claim_id"):
                         occ_by_id[oid]["claim_id"] = cid
                 if cid not in claim_by_id:
+                    citation_status = raw_claim.get("citation_status")
+                    if citation_status is not None and citation_status not in common.CITATION_STATUSES:
+                        raise ValueError(f"Claim {cid} has invalid citation_status: {citation_status!r}")
+                    citation_text = raw_claim.get("citation_text")
+                    if citation_text is not None and not isinstance(citation_text, str):
+                        raise ValueError(f"Claim {cid} citation_text must be a string or null")
+                    cited_tier = raw_claim.get("cited_source_tier")
+                    if cited_tier is not None and cited_tier not in common.SOURCE_TIER_WEIGHTS:
+                        raise ValueError(f"Claim {cid} has invalid cited_source_tier: {cited_tier!r}")
                     c_rec = {
                         "schema_version": 1, "claim_id": cid, "subject_id": raw_claim.get("subject_id", cfg["subject"]),
                         "occurrence_ids": occ_ids, "text": raw_claim["text"], "domain": raw_claim.get("domain", "general"),
@@ -309,16 +405,41 @@ def merge_extraction(ledger, run, result_paths=None, strict_quotes=False):
                         "review_state": "needs_review" if not all_quotes_ok else raw_claim.get("review_state", "unreviewed"),
                         "quote_verified": all_quotes_ok,
                     }
-                    if raw_claim.get("family_id"):
-                        c_rec["family_id"] = raw_claim["family_id"]
+                    # Preserve optional schema fields (reason, certainty_text, first_stated_at,
+                    # supersedes, next_check_at, family_id, operationalization_status,
+                    # citation_status, citation_text, etc.) while blocking shards from forging
+                    # post-adjudication fields. Absent citation tags stay absent (legacy runs).
+                    for key, value in raw_claim.items():
+                        if key in c_rec or key in EXTRACTION_PROTECTED_CLAIM_FIELDS or value is None:
+                            continue
+                        if key == "family_id" and not value:
+                            continue
+                        c_rec[key] = value
+                    if not c_rec.get("first_stated_at"):
+                        inferred_stated = common.earliest_stated_at(c_rec, occ_by_id, sources, cfg["scope"]["timezone"])
+                        if inferred_stated:
+                            c_rec["first_stated_at"] = inferred_stated
+                    if c_rec.get("claim_type") == "prediction":
+                        stated = common.earliest_stated_at(c_rec, occ_by_id, sources, cfg["scope"]["timezone"])
+                        target_end = common.claim_target_deadline(c_rec)
+                        if stated and target_end:
+                            ok_t, _, detail_t = common.check_prediction_temporal_order(
+                                stated, target_end, common.claim_criteria_timezone(c_rec, cfg["scope"]["timezone"])
+                            )
+                            if not ok_t:
+                                c_rec["review_state"] = "needs_review"
+                                c_rec["temporal_guard_warning"] = detail_t
+                                temporal_warnings += 1
                     claim_by_id[cid] = c_rec
                     claims.append(c_rec)
                     added_claims += 1
         ledger.write_jsonl(run / "occurrences.jsonl", occurrences)
         ledger.write_jsonl(run / "claims.jsonl", claims)
-        ledger.event(run, "extraction_merged", added_occurrences=added_occ, added_claims=added_claims, unverified_quotes=unverified_quotes)
+        ledger.event(run, "extraction_merged", added_occurrences=added_occ, added_claims=added_claims,
+                     unverified_quotes=unverified_quotes, temporal_warnings=temporal_warnings)
         return {"added_occurrences": added_occ, "added_claims": added_claims,
-                "unverified_quotes": unverified_quotes, "total_occurrences": len(occurrences), "total_claims": len(claims)}
+                "unverified_quotes": unverified_quotes, "temporal_warnings": temporal_warnings,
+                "total_occurrences": len(occurrences), "total_claims": len(claims)}
 
 
 def compute_coverage(ledger, run, out_path="coverage.json", inventory_complete=True):
@@ -389,9 +510,7 @@ def new_assessment_round(ledger, run, new_as_of, reason="scheduled_reassessment"
     with ledger.coordinator_lock(run):
         cfg = ledger.config(run)
         zone = ZoneInfo(cfg["scope"]["timezone"])
-        as_of_dt = ledger.as_of_time(new_as_of, zone)
-        if as_of_dt > datetime.now(timezone.utc) + __import__("datetime").timedelta(minutes=5):
-            raise ValueError("Assessment --as-of cannot be in the future")
+        as_of_dt = ledger.resolve_as_of_time(new_as_of, zone)
         rounds = cfg.setdefault("assessment_rounds", [])
         rounds.append({"as_of": cfg["scope"]["as_of"], "config_hash": cfg["config_hash"], "closed_at": common.now()})
         cfg["scope"]["as_of"] = as_of_dt.astimezone(timezone.utc).isoformat()
@@ -401,6 +520,8 @@ def new_assessment_round(ledger, run, new_as_of, reason="scheduled_reassessment"
         updated_due = 0
         for c in claims:
             if c.get("accountability_eligible") and c.get("criteria") and c.get("lifecycle") in {"pending", "ready"}:
+                if c.get("reason") == "trigger_unmet" or (c.get("trigger_assessment") or {}).get("state") == "unmet":
+                    continue
                 defn = c["criteria"]["definition"]
                 end = defn.get("window_end")
                 due = True if not end else ledger.as_of_time(end, ZoneInfo(defn["timezone"])) <= as_of_dt
@@ -414,19 +535,128 @@ def new_assessment_round(ledger, run, new_as_of, reason="scheduled_reassessment"
         return {"as_of": cfg["scope"]["as_of"], "config_hash": cfg["config_hash"], "newly_due_claims": updated_due}
 
 
+def _resolve_rubric(rubric_path=None):
+    path = Path(rubric_path).resolve() if rubric_path else DEFAULT_RUBRIC_PATH
+    rubric = common.read_json(path)
+    return path, rubric, common.digest(rubric)
+
+
+def _format_seconds_clock(value):
+    total = int(round(float(value)))
+    hours, rem = divmod(max(0, total), 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+def _format_locator(locator):
+    if not isinstance(locator, dict):
+        return ""
+    kind = locator.get("kind") or ""
+    start, end = locator.get("start"), locator.get("end")
+    parts = []
+    if kind in {"cue", "timestamp"} and common.finite_number(start):
+        span = _format_seconds_clock(start)
+        if common.finite_number(end):
+            span += "–" + _format_seconds_clock(end)
+        parts.append(span)
+    elif start is not None:
+        span = f"{kind} {start}".strip()
+        if end is not None and end != start:
+            span += f"–{end}"
+        parts.append(span)
+    start_u = locator.get("start_unit") or locator.get("unit_id") or locator.get("id")
+    end_u = locator.get("end_unit")
+    if start_u:
+        unit_span = f"{start_u}–{end_u}" if end_u and end_u != start_u else str(start_u)
+        parts.append(unit_span)
+    return " · ".join(parts)
+
+
+def _extract_decision_rationale(ledger, run, claim):
+    acceptance = claim.get("acceptance")
+    if isinstance(acceptance, dict) and common.nonempty(acceptance.get("decision_path")):
+        try:
+            dec_path = ledger.inside(run, acceptance["decision_path"])
+            if dec_path.is_file():
+                artifact = common.read_json(dec_path)
+                cons = artifact.get("consensus") or {}
+                dec = cons.get("decision")
+                if isinstance(dec, dict) and common.nonempty(dec.get("rationale")):
+                    return dec["rationale"].strip()
+                votes = cons.get("votes") or []
+                vote_rationales = []
+                seen = set()
+                for vote in votes:
+                    rat = (vote.get("rationale") or "").strip() if isinstance(vote, dict) else ""
+                    if rat and rat not in seen:
+                        seen.add(rat)
+                        rid = vote.get("reviewer_id")
+                        vote_rationales.append((rid, rat))
+                if len(vote_rationales) == 1:
+                    return vote_rationales[0][1]
+                if len(vote_rationales) > 1:
+                    return "; ".join(f"[{rid}] {rat}" if rid else rat for rid, rat in vote_rationales)
+        except (ValueError, OSError, KeyError, TypeError):
+            pass
+    return f"lifecycle={claim['lifecycle']}, mode={claim['evaluation_mode']}"
+
+
+def _compute_report_inputs(ledger, run, metrics_path="reports/metrics.json", coverage_path="coverage.json",
+                           rubric_path=None, subject_id=None):
+    metrics_file = ledger.inside(run, metrics_path)
+    cov_file = ledger.inside(run, coverage_path)
+    metrics = common.read_json(metrics_file) if metrics_file.exists() else None
+    coverage = common.read_json(cov_file) if cov_file.exists() else {}
+    claims = ledger.read_jsonl(run / "claims.jsonl")
+    if subject_id is not None:
+        claims = [c for c in claims if c.get("subject_id") == subject_id]
+        if not claims:
+            raise ValueError(f"No claims found for selected subject_id: {subject_id}")
+    r_path, rubric, rubric_hash = _resolve_rubric(rubric_path)
+    data_hash = common.digest({"claims": claims, "coverage": coverage, "metrics": metrics})
+    return {
+        "metrics": metrics, "metrics_present": metrics_file.exists(),
+        "coverage": coverage, "coverage_present": cov_file.exists(),
+        "claims": claims, "rubric": rubric, "rubric_path": str(r_path),
+        "rubric_hash": rubric_hash, "data_hash": data_hash,
+    }
+
+
+def report_hashes(ledger, run, metrics_path="reports/metrics.json", coverage_path="coverage.json",
+                  rubric_path=None, subject_id=None):
+    run = Path(run).resolve()
+    with ledger.coordinator_lock(run):
+        ledger.config(run)
+        computed = _compute_report_inputs(ledger, run, metrics_path, coverage_path, rubric_path, subject_id=subject_id)
+        return {
+            "data_hash": computed["data_hash"],
+            "rubric_hash": computed["rubric_hash"],
+            "rubric_path": computed["rubric_path"],
+            "score_scale": computed["rubric"].get("scale"),
+            "claims_count": len(computed["claims"]),
+            "subject_id": subject_id,
+            "metrics_present": computed["metrics_present"],
+            "coverage_present": computed["coverage_present"],
+        }
+
+
 def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_path="reports/metrics.json",
-                      coverage_path="coverage.json", title=None, synthetic=False):
+                      coverage_path="coverage.json", title=None, synthetic=False, rubric_path=None, subject_id=None):
     import model_panel as panel
     run = Path(run).resolve()
     with ledger.coordinator_lock(run):
         cfg = ledger.config(run)
-        metrics_file = ledger.inside(run, metrics_path)
-        cov_file = ledger.inside(run, coverage_path)
-        metrics = common.read_json(metrics_file) if metrics_file.exists() else None
-        coverage = common.read_json(cov_file) if cov_file.exists() else {}
-        claims = ledger.read_jsonl(run / "claims.jsonl")
+        computed = _compute_report_inputs(ledger, run, metrics_path, coverage_path, rubric_path, subject_id=subject_id)
+        metrics = computed["metrics"]
+        coverage = computed["coverage"]
+        claims = computed["claims"]
+        rubric = computed["rubric"]
+        data_hash = computed["data_hash"]
         sources_rows = ledger.read_jsonl(run / "sources.jsonl")
+        sources_by_id = {s["source_id"]: s for s in sources_rows if isinstance(s, dict) and s.get("source_id")}
         evidence_rows = ledger.read_jsonl(run / "evidence.jsonl")
+        occurrences_rows = ledger.read_jsonl(run / "occurrences.jsonl") if (run / "occurrences.jsonl").exists() else []
+        occ_by_id = {o["occurrence_id"]: o for o in occurrences_rows if isinstance(o, dict) and o.get("occurrence_id")}
         costs_rows = ledger.read_jsonl(run / "costs.jsonl") if (run / "costs.jsonl").exists() else []
         est_usd = sum(r.get("estimated_usd") or 0 for r in costs_rows) if costs_rows else None
         obs_vals = [r["actual_usd"] for r in costs_rows if r.get("actual_usd") is not None]
@@ -453,15 +683,127 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 "url": e.get("source_url"), "published_at": e.get("published_at"),
                 "locator": e.get("local_path") or e.get("source_family") or "", "excerpt": e.get("excerpt") or "",
             })
+        url_by_id = {s["id"]: s["url"] for s in report_sources if s.get("url")}
         cases = []
-        for c in claims[:20]:
-            if c.get("lifecycle") == "resolved":
-                cases.append({
-                    "title": c["text"][:80], "claim": c["text"],
-                    "status": c.get("outcome") or "not_checked",
-                    "assessment": f"lifecycle={c['lifecycle']}, mode={c['evaluation_mode']}",
-                    "evidence_ids": [eid for eid in c.get("evidence_ids", []) if eid in seen_sids],
+        for c in claims:
+            lifecycle = c.get("lifecycle")
+            is_resolved = lifecycle == "resolved"
+            is_notable_pending = lifecycle == "pending" and (
+                c.get("reason") == "trigger_unmet" or c.get("criteria") is not None
+            )
+            is_notable_hypothetical = lifecycle == "unscorable" and c.get("claim_type") == "hypothetical"
+            # Every canonical claim is exported so the single-file dashboard can filter the whole corpus;
+            # narrative cards are still reserved for notable claims (see render_report).
+            occ_details = []
+            occ_source_ids = []
+            for oid in c.get("occurrence_ids") or []:
+                occ = occ_by_id.get(oid)
+                if not occ:
+                    continue
+                ts = _format_locator(occ.get("locator"))
+                occ_details.append({
+                    "occurrence_id": oid,
+                    "source_id": occ.get("source_id"),
+                    "speaker": occ.get("speaker"),
+                    "endorsement": occ.get("endorsement"),
+                    "original_quote": occ.get("original_quote") or "",
+                    "locator": occ.get("locator"),
+                    "timestamp": ts,
                 })
+                if occ.get("source_id") in seen_sids and occ["source_id"] not in occ_source_ids:
+                    occ_source_ids.append(occ["source_id"])
+            first_quote = next((o["original_quote"] for o in occ_details if o["original_quote"]), None)
+            primary_speaker = next((o["speaker"] for o in occ_details if common.nonempty(o.get("speaker"))), None) or c.get("subject_id")
+            timestamps = [o["timestamp"] for o in occ_details if o["timestamp"]]
+            ts_summary = ", ".join(dict.fromkeys(timestamps))
+            if is_resolved:
+                status = c.get("outcome") or "not_checked"
+                assessment = _extract_decision_rationale(ledger, run, c)
+            elif is_notable_pending:
+                status = "pending"
+                if c.get("reason") == "trigger_unmet":
+                    trig_note = ((c.get("trigger_assessment") or {}).get("note") or "").strip()
+                    cond = ((c.get("criteria") or {}).get("definition") or {}).get("condition")
+                    cond_text = cond.get("trigger") if isinstance(cond, dict) else (cond if isinstance(cond, str) else "")
+                    assessment = "Conditional trigger unmet (pending, not scored as error)."
+                    if cond_text:
+                        assessment += f" Condition: {cond_text}."
+                    if trig_note:
+                        assessment += f" {trig_note}"
+                else:
+                    reason = c.get("reason") or "not_yet_due"
+                    assessment = f"Pending assessment ({reason}; not scored as error)."
+            elif lifecycle == "unscorable":
+                status = "not_checked"
+                reason = c.get("reason") or ("hypothetical_scenario" if c.get("claim_type") == "hypothetical" else "unscorable")
+                assessment = (f"Unscorable hypothetical scenario ({reason}); excluded from empirical accuracy denominators."
+                              if c.get("claim_type") == "hypothetical" else
+                              f"Unscorable claim ({reason}); excluded from accuracy denominators.")
+            else:
+                status = "pending"
+                reason = c.get("reason") or "not_yet_due"
+                assessment = f"Pending assessment ({reason}; lifecycle={lifecycle}; not scored as error)."
+            ev_ids = [eid for eid in c.get("evidence_ids", []) if eid in seen_sids]
+            if not ev_ids:
+                ev_ids = occ_source_ids
+            lead_time_days = None
+            if c.get("claim_type") == "prediction":
+                stated_at = common.earliest_stated_at(c, occ_by_id, sources_by_id, cfg["scope"]["timezone"])
+                target_end = common.claim_target_deadline(c)
+                if stated_at and target_end:
+                    try:
+                        ok_lt, lt_val, _ = common.check_prediction_temporal_order(
+                            stated_at, target_end, common.claim_criteria_timezone(c, cfg["scope"]["timezone"])
+                        )
+                        if ok_lt:
+                            lead_time_days = lt_val
+                    except ValueError:
+                        lead_time_days = None
+            diff_tier = common.resolve_difficulty_tier(c)
+            note_parts = [c["claim_id"], c.get("claim_type") or "claim"]
+            if diff_tier != "unrated":
+                note_parts.append(f"difficulty={diff_tier}")
+            if lead_time_days is not None:
+                note_parts.append(f"lead={lead_time_days:g}d")
+            if c.get("reason"):
+                note_parts.append(f"reason={c['reason']}")
+            if ts_summary:
+                note_parts.append(ts_summary)
+            case_obj = {
+                "id": c["claim_id"],
+                "title": c["text"][:80],
+                "claim": c["text"],
+                "claim_type": c.get("claim_type"),
+                "subject_id": c.get("subject_id"),
+                "speaker": primary_speaker,
+                "endorsement": c.get("endorsement"),
+                "lifecycle": lifecycle,
+                "status": status,
+                "assessment": assessment,
+                "evidence_ids": ev_ids,
+                "notes": " · ".join(note_parts),
+            }
+            if diff_tier != "unrated":
+                case_obj["difficulty"] = diff_tier
+            if c.get("difficulty_score") is not None:
+                case_obj["difficulty_score"] = c["difficulty_score"]
+            if c.get("difficulty_rationale"):
+                case_obj["difficulty_rationale"] = c["difficulty_rationale"]
+            if lead_time_days is not None:
+                case_obj["lead_time_days"] = lead_time_days
+            case_obj["verdict"] = c.get("outcome")
+            case_obj["citation_status"] = c.get("citation_status")
+            if c.get("cited_source_tier") is not None:
+                case_obj["cited_source_tier"] = c["cited_source_tier"]
+            case_obj["evidence_urls"] = [url_by_id[eid] for eid in ev_ids if eid in url_by_id]
+            case_obj["notable"] = bool(is_resolved or is_notable_pending or is_notable_hypothetical)
+            if first_quote:
+                case_obj["original_quote"] = first_quote
+            if ts_summary:
+                case_obj["timestamps"] = ts_summary
+            if occ_details:
+                case_obj["occurrences"] = occ_details
+            cases.append(case_obj)
         panel_obj = None
         pol_path = run / "config/model-policy.json"
         rep_dir = run / "reviews/reports"
@@ -471,26 +813,62 @@ def build_report_data(ledger, run, out_path="reports/report-data.json", metrics_
                 pol = panel.load_policy(pol_path)
                 reviews = [common.read_json(f) for f in rep_files]
                 panel_obj = {"policy": pol, "reviews": reviews}
-        rubric = common.read_json(Path(__file__).resolve().parent.parent / "assets/evaluation-rubric.json")
-        data_hash = common.digest({"claims": claims, "coverage": coverage, "metrics": metrics})
+        summary_lines = [f"Total canonical claims: {len(claims)}."]
+        if isinstance(metrics, dict):
+            sr = metrics.get("strict_support_rate") or {}
+            if sr.get("denominator"):
+                summary_lines.append(
+                    f"Strict support rate: {sr['value'] * 100:.1f}% ({sr['numerator']}/{sr['denominator']} adjudicated categorical claims)."
+                )
+            by_type = metrics.get("by_claim_type") or {}
+            splits = []
+            for ctype in ("factual", "prediction"):
+                tsr = (by_type.get(ctype) or {}).get("strict_support_rate") or {}
+                if tsr.get("denominator"):
+                    splits.append(f"{ctype}: {tsr['value'] * 100:.1f}% ({tsr['numerator']}/{tsr['denominator']})")
+            if splits:
+                summary_lines.append("Claim-type split — " + "; ".join(splits) + ".")
+            pdiff = metrics.get("prediction_difficulty") or {}
+            nt_sr = pdiff.get("non_trivial_strict_support_rate") or {}
+            if pdiff.get("rated_n") and nt_sr.get("denominator"):
+                summary_lines.append(
+                    f"Non-trivial prediction support rate: {nt_sr['value'] * 100:.1f}% ({nt_sr['numerator']}/{nt_sr['denominator']}; {pdiff['rated_n']} rated predictions)."
+                )
+            phor = metrics.get("prediction_horizon") or {}
+            if phor.get("dated_n") and phor.get("mean_lead_time_days") is not None:
+                summary_lines.append(
+                    f"Dated predictions ({phor['dated_n']}): mean lead time {phor['mean_lead_time_days']:.1f}d, median {phor['median_lead_time_days']:.1f}d."
+                )
+        report_subject = subject_id or cfg["subject"]
+        rubric_dim_ids = [d["id"] for d in rubric.get("dimensions", []) if isinstance(d, dict) and d.get("id")]
+        pdiff_all = (metrics or {}).get("prediction_difficulty") or {}
+        subjective_attribution = {
+            "rubric": panel.subjective_attribution(panel_obj["policy"], panel_obj["reviews"], rubric_dim_ids,
+                                                   judge=panel_obj.get("judge")) if panel_obj else None,
+            "difficulty": {"subjective": True, "rated_n": pdiff_all.get("rated_n", 0),
+                           "rated_by_model_id": pdiff_all.get("rated_by_model_id", {})},
+            "note": "Subjective ratings (rubric scores, difficulty tiers) are attributed to the model(s) that produced them; objective fact-check metrics are evidence-backed and separate.",
+        }
         payload = {
             "schema_version": 1, "synthetic": bool(synthetic), "data_hash": data_hash,
             "rubric": rubric,
             "report": {
-                "title": title or f"Claim Audit: {cfg['subject']}",
-                "subject": cfg["subject"],
+                "title": title or f"Claim Audit: {report_subject}",
+                "subject": report_subject,
                 "period_start": cfg["scope"]["start"], "period_end": cfg["scope"]["end"],
                 "as_of": cfg["scope"]["as_of"][:10], "generated_at": common.now()[:10],
-                "summary": [f"Total canonical claims: {len(claims)}."],
+                "summary": summary_lines,
             },
-            "metrics": metrics, "panel": panel_obj, "topics": [], "cases": cases,
+            "metrics": metrics, "panel": panel_obj, "subjective_attribution": subjective_attribution,
+            "topics": [], "cases": cases,
             "coverage": coverage,
             "costs": {"estimated_usd": est_usd, "observed_usd": obs_usd, "budget_usd": (cfg.get("costs") or {}).get("approved_budget_usd")},
             "sources": report_sources,
         }
         target = ledger.inside(run, out_path)
         common.write_json(target, payload)
-        return {"report_data_path": str(target), "data_hash": data_hash, "cases": len(cases), "sources": len(report_sources)}
+        return {"report_data_path": str(target), "data_hash": data_hash, "rubric_hash": computed["rubric_hash"],
+                "cases": len(cases), "sources": len(report_sources)}
 
 
 def handoff_export(ledger, run, task_ids, packet_id=None):

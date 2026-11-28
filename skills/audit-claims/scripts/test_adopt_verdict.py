@@ -391,5 +391,100 @@ class AdoptionTests(unittest.TestCase):
             self.adopt()
 
 
+    def test_set_evidence_quality_cli_and_rejects_after_adoption(self):
+        self.claim['evidence_quality'] = None
+        audit.write_jsonl(self.run / 'claims.jsonl', [self.claim])
+        with redirect_stdout(io.StringIO()):
+            rc = bridge.main(['set-evidence-quality', '--run', str(self.run), '--claim-id', 'c1',
+                              '--directness', '1', '--independence', '0.5', '--traceability', '1',
+                              '--rationale', 'Primary release with single family.'])
+        self.assertEqual(rc, 0)
+        updated = self.adopted()
+        self.assertEqual(updated['evidence_quality'], {
+            'directness': 1, 'independence': 0.5, 'traceability': 1,
+            'rationale': 'Primary release with single family.',
+        })
+        # Now adoption succeeds without hand-editing claims.jsonl.
+        self.adopt()
+        # Mutating evidence_quality after adoption must fail unless reopened first.
+        with self.assertRaisesRegex(ValueError, 'after verdict adoption'):
+            bridge.set_evidence_quality(self.run, 'c1', 0.5, 0.5, 0.5)
+
+    def test_mark_trigger_unmet_links_evidence_preserves_history_and_survives_assess(self):
+        import audit_pipeline as pipeline
+        # Non-conditional claim must be rejected.
+        with self.assertRaisesRegex(ValueError, 'Only conditional'):
+            bridge.mark_trigger_unmet(self.run, 'c1', ['e-a'])
+        # Make c1 conditional with frozen criteria.
+        self.claim['verifiability'] = 'conditional'
+        self.claim['criteria']['definition']['condition'] = {'trigger': 'UNRATE == 4.3%'}
+        self.claim['criteria']['sha256'] = bridge.hashed(self.claim['criteria']['definition'])
+        audit.write_jsonl(self.run / 'claims.jsonl', [self.claim])
+        with redirect_stdout(io.StringIO()):
+            rc = bridge.main(['mark-trigger-unmet', '--run', str(self.run), '--claim-id', 'c1',
+                              '--evidence-ids', 'e-a', '--note', 'BLS printed 4.1% on Jan 10.'])
+        self.assertEqual(rc, 0)
+        c = self.adopted()
+        self.assertEqual(c['lifecycle'], 'pending')
+        self.assertIs(c['due_for_assessment'], False)
+        self.assertEqual(c['reason'], 'trigger_unmet')
+        self.assertEqual(c['evidence_ids'], ['e-a'])
+        self.assertEqual(c['trigger_assessment']['state'], 'unmet')
+        self.assertEqual(len(list((self.run / 'history/claims').glob('*.json'))), 1)
+        # Validate against score_claims and verify new_assessment_round keeps it pending/not due.
+        scoring.validate_claim(c)
+        round_res = pipeline.new_assessment_round(audit, self.run, '2026-06-01T00:00:00Z')
+        self.assertEqual(round_res['newly_due_claims'], 0)
+        c_after = self.adopted()
+        self.assertEqual(c_after['lifecycle'], 'pending')
+        self.assertIs(c_after['due_for_assessment'], False)
+
+    def test_temporal_guard_blocks_adoption_and_score_run_enriches_stated_at(self):
+        # First verify normal adoption + score_run enriches first_stated_at from sources.jsonl (2025-01-01 -> 2025-12-31 = 364d).
+        self.adopt()
+        args = self.score_args()
+        metrics = scoring.score_run(args)
+        self.assertEqual(metrics['prediction_horizon']['dated_n'], 1)
+        self.assertEqual(metrics['prediction_horizon']['mean_lead_time_days'], 364.0)
+        # Now test retroactive prediction (source published 2025-10-01, window_end 2025-09-30) is blocked by adopt.
+        retro_run = self.run.parent / 'retro_adopt'
+        audit.init(Namespace(run=str(retro_run), subject='speaker', start='2021-01-01', end='2026-01-01',
+                             as_of='2026-01-01T23:59:59+00:00', timezone='UTC', cutoff_mode='retrospective'))
+        defn = {'target': 'Sept 30 event', 'predicate': 'Occurred', 'window_start': '2025-09-01',
+                'window_end': '2025-09-30', 'timezone': 'UTC', 'condition': 'unconditional', 'resolution_basis': 'explicit'}
+        c = claim(lifecycle='ready', outcome=None, resolved_at=None, evidence_ids=[], review_state='unreviewed',
+                  criteria={'definition': defn, 'version': '1', 'frozen_at': '2025-10-02T00:00:00Z',
+                            'sha256': bridge.hashed(defn)})
+        audit.write_jsonl(retro_run / 'claims.jsonl', [c])
+        audit.write_jsonl(retro_run / 'occurrences.jsonl', [occurrence('o_c1', 'c1')])
+        audit.atomic_text(retro_run / 'sources/source.md', 'Original quote.\n')
+        audit.write_jsonl(retro_run / 'sources.jsonl', [{'source_id': 'source', 'source_url': 'https://example.org/talk',
+            'published_at': '2025-10-01', 'status': 'ready', 'content_path': 'sources/source.md',
+            'content_hash': bridge.file_sha(retro_run / 'sources/source.md')}])
+        panel.init(retro_run)
+        pol = panel.read_json(retro_run / 'config/model-policy.json')
+        pol.update(status='confirmed', selected_models=[{'id': 'a', 'provider': 'fixture', 'api_model': 'a',
+                   'availability': 'available', 'cost': {'mode': 'included', 'estimate_usd': 0}}])
+        pol['roles'] = {'lookup': ['a'], 'extract': ['a'], 'verify': ['a'], 'report': ['a'], 'judge': []}
+        pol['verification'] = {'mode': 'single', 'required_reviewers': ['a'], 'judge_model_id': None}
+        pol['report'] = {'reviewers': ['a'], 'judge_model_id': None}
+        panel.write_json(retro_run / 'config/model-policy.json', pol)
+        panel.freeze(retro_run)
+        pol = panel.load_policy(retro_run / 'config/model-policy.json')
+        audit.write_jsonl(retro_run / 'evidence.jsonl', [{
+            'evidence_id': 'e-a', 'claim_ids': ['c1'], 'source_url': 'https://example.org/e',
+            'retrieved_at': '2026-01-02T10:00:00Z', 'available_at': '2025-10-01T00:00:00Z',
+            'excerpt': 'Event happened.', 'relation': 'supports', 'source_family': 'primary'}])
+        fp = bridge.verification_fingerprint(retro_run, c)
+        cons = panel.consensus(pol, [{'vote_id': 'v1', 'reviewer_id': 'a', 'claim_id': 'c1',
+                                      'criteria_hash': c['criteria']['sha256'], 'input_hash': fp,
+                                      'as_of': audit.config(retro_run)['scope']['as_of'], 'verdict': 'supported',
+                                      'normalized_result': {'outcome': 'supported'}, 'evidence_ids': ['e-a'],
+                                      'rationale': 'ok', 'independent': True}])
+        audit.write_json(retro_run / 'cons.json', cons)
+        with self.assertRaisesRegex(ValueError, 'temporal guard'):
+            bridge.adopt(retro_run, 'c1', retro_run / 'cons.json')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,13 +1,63 @@
 # 转录与成本控制 / Transcription and cost control
 
-目录：输入选择 · 估算与授权 · 示例脚本 · 输出与续跑 · 模型差异 · 质量检查 · 参考来源。
+目录：输入选择 · 本地与 GPU 转录配方 · 估算与授权 · 示例脚本 · 输出与续跑 · 模型差异 · 质量检查 · 参考来源。
 
 ## 输入选择
 
-1. 优先使用用户已有的文本、字幕及允许访问的 transcript；保存原始版本，不把平台自动字幕当成已校对原文。
+1. 优先使用用户已有的文本、字幕及允许访问的 transcript；保存原始版本，不把平台自动字幕当成已校对原文。使用 `yt-dlp` 下载 YouTube 自动字幕时，优先选择 `--sub-format srt`（直接输出干净的单行无滚动 cue）；若保存 `.vtt`，规范化时传入 `normalize_sources.py --clean-youtube-vtt` 清理行内时间戳标签与双行滚动重复。
 2. 文本缺失时，先列出音频清单、语言、总时长和预期精度。比较已安装的本地模型与获准使用的云端服务。根据口音、混合语言、专有名词、数字与否定词，选取有代表性的短片段测试；样本转录若收费，也先取得授权。
 3. 本地运行没有云 API 账单，但应估计设备资源和耗时；不要未经授权下载几十 GB 模型或安装大型依赖。
-4. 使用任意本地或云端 STT 均可；将结果转换为统一源文本格式。下面的 OpenAI 示例是可替换的工具，不是分析方法的依赖。
+4. 使用任意本地或云端 STT 均可；将结果转换为统一源文本格式。下面的本地/GPU 配方与 OpenAI 示例均是可替换工具，不是分析方法的依赖。
+
+## 本地与 GPU 转录配方 / Local & GPU STT Recipes
+
+以下配方已在真实中文与英文音视频语料上验证，无云端 API 账单，且输出可直接接入 `normalize_sources.py`：
+
+### 1. Apple Silicon 本地转录（`mlx-whisper`）
+
+适合 M1–M4 Mac 在无云费用或需要离线隐私保护时转录：
+
+```python
+import json, mlx_whisper
+
+result = mlx_whisper.transcribe(
+    "audio/episode.m4a",
+    path_or_hf_repo="mlx-community/whisper-large-v3-turbo",  # 中文高准确率可选 whisper-large-v3-mlx
+    language="zh",
+    word_timestamps=True,
+    condition_on_previous_text=False,  # 显著降低尾部/静音复读幻觉
+)
+# 保存与 normalize_sources.py 兼容的 JSON，并在 manifest 中传入 media_duration_seconds 与 transcription 元数据
+```
+
+- **尾部幻觉过滤与核验**：`mlx-whisper` 在片尾音乐/静音段容易出现连续重复短句（如连续 ≥5 条“谢谢观看”“Thank you”或时间戳超过音频真实时长 `end_seconds > media_duration_seconds`）。保留完整原始 JSON 到 `raw/`，不要静默丢弃片段；在 manifest 中提供 `ffprobe` 实测的 `media_duration_seconds`，`normalize_sources.py` 会自动检测并打上 `stt_tail_hallucination` / `stt_repeated_cue_hallucination` / `stt_duration_overflow` 质量标记，提取阶段据此跳过尾部幻觉段并人工复核异常项。
+
+### 2. NVIDIA GPU 批量转录（`faster-whisper large-v3`，如远端 GPU 主机 `ufo`）
+
+适合长视频或多期中文/双语节目的高精度批量转录：
+
+- **依赖与运行环境注意事项（已实测）**：
+  - 锁定 `av<16`：`pip install "av<16" faster-whisper`（PyAV 16 与部分 `faster-whisper` 音频解码接口不兼容）。
+  - 显式导出 pip 安装的 cuBLAS / cuDNN 动态库路径到 `LD_LIBRARY_PATH`，避免 CTranslate2 运行时找不到 `libcublas.so` / `libcudnn.so`：
+    ```bash
+    export LD_LIBRARY_PATH="$(python3 -c 'import nvidia.cublas.lib, nvidia.cudnn.lib; print(f"{nvidia.cublas.lib.__path__[0]}:{nvidia.cudnn.lib.__path__[0]}")'):${LD_LIBRARY_PATH:-}"
+    ```
+- **推荐推理参数**：
+  ```python
+  from faster_whisper import WhisperModel
+
+  model = WhisperModel("large-v3", device="cuda", compute_type="float16")
+  segments, info = model.transcribe(
+      "audio/episode.m4a",
+      language="zh",
+      vad_filter=True,                   # Silero VAD 过滤静音段，抑制尾部复读
+      word_timestamps=True,              # 精确 cue 边界并便于检测时长溢出
+      condition_on_previous_text=False,
+      initial_prompt="以下是关于宏观经济、地缘政治、股市与财报的中文评论，使用简体中文标点。常见专有名词：美联储、通胀、CPI、纳斯达克、英伟达、特斯拉、比特币。",
+  )
+  ```
+- **中文领域 `initial_prompt`**：根据被审计对象定制简体中文标点与高频人名/地名/机构/金融专有名词，可明显减少繁简漂移与同音专词误识。
+- **元数据透传**：将 `media_duration_seconds`（来自 `ffprobe`）、`transcription`（如 `{"engine":"faster-whisper","model":"large-v3","vad_filter":true,"word_timestamps":true,"device":"cuda"}`）与可选 `quality_flags` 写入摄取 manifest；`normalize_sources.py` 会原样透传到 frontmatter、`sources.jsonl` 及旁路 `.locators.json`，并自动附加检测到的 STT 异常标记。
 
 ## 估算与授权
 
@@ -91,7 +141,57 @@ python3 scripts/transcribe_openai.py run \
 
 ## 质量检查
 
-抽检数字、日期、单位、专有名词、否定词与说话人归属。对混合语言、方言、多人重叠以及低质量录音增加抽检。不确定片段保留原文和定位，使用 `transcript_uncertain` 标记；不要让 STT 错字变成说话人的错误。静音或空转录不作为观点；对返回文本异常短的长录音检查是否截断。把转录模型、运行时间、原始音频哈希和质量标记写入源文件元数据。
+抽检数字、日期、单位、专有名词、否定词与说话人归属。对混合语言、方言、多人重叠以及低质量录音增加抽检。不确定片段保留原文和定位，使用 `transcript_uncertain` 标记；不要让 STT 错字变成说话人的错误。静音或空转录不作为观点；对返回文本异常短的长录音检查是否截断。在摄取 manifest 中提供 `media_duration_seconds`、`transcription` 与可选 `quality_flags`，`normalize_sources.py` 会自动检测 ≥5 条连续相同短 cue（`stt_tail_hallucination` / `stt_repeated_cue_hallucination`）及 `end_seconds > media_duration_seconds`（`stt_duration_overflow`）并写入元数据与 `.locators.json` 诊断字段，不静默删改原始文本。把转录模型、运行时间、原始音频哈希和质量标记写入源文件元数据。
+
+## 视频简介与屏幕视觉核验（Description & Visual Check）
+
+### 简介（description）
+
+创作者常在 YouTube 简介里放参考链接和报告名，但这些文字不被口述，只读字幕会漏掉。用 `yt-dlp --write-info-json` 下载时，在摄取 manifest 中给出 `info_json`（相对 manifest 的路径，读取其中的 `description`），或直接给出 `description` 字符串。`normalize_sources.py` 会把非空简介追加为正文末尾的独立段落：正文标注 `Uploader description (written text, not spoken in the video)`，定位为 `p-XXXXXX`（`origin=video_description`）。frontmatter 记录 `description_origin`、`description_locator_id`、`description_sha256`。引用简介时使用该段落的定位，并按 worker-prompts 的简介护栏标注 `source_surface="video_description"`。
+
+### 直接读取视频（默认关闭，显式开启）
+
+默认**不下载完整视频，也不把完整视频交给多模态 LLM**。480p 视频约 106–110 tokens/s，一段 10 分钟视频约 80K tokens，成本与时长成正比，且远超定位出处所需的信息量。默认路径依次为：字幕 / STT → 视频简介 → 结尾卡与断言时间点的定向 ffmpeg 抽帧（见下文）。
+
+只在以下两种情形开启直接读取，并须满足全部条件：
+
+- **用户明确要求**直接读取视频画面（如“直接看视频”“读一下画面上的图表”）；或
+- **图表密集的频道**中，口述始终缺失出处，经用户确认后才开启。
+
+开启后的约束：
+
+1. 使用 480p 或更低分辨率的视频流（如 `yt-dlp -f "bv*[height<=480]"`），不要下载更高清版本。
+2. 使用低推理强度的模型，例如 `gemini-4-hydrogen-low`。模型 ID 与价格须在运行前对照供应商当前列表重新核验，不沿用本文档的示例值。
+3. 提示词只要求抽取屏幕上的图表标题、单位、数值、水印 / 机构标识与结尾参考卡上的报告名、链接，并按 `visual_evidence` 结构返回；不要让模型据此重写或补全观点原话。
+4. 先按整段时长估算 token 与费用，经 [budgeting.md](budgeting.md) 的流程取得授权；超出授权偏差时暂停。
+5. 视频文件仍放在 `media/`（被 Git 忽略），模型输出写入 `work/results/` 并登记 checkpoint，与定向抽帧的记录格式相同。
+
+直接读取的结果同样受 `visual_evidence` 规则约束：没有口述采纳时，归属置信度不高于 `medium`，endorsement 用 `unclear`。
+
+### 屏幕图表与结尾参考卡（ffmpeg 定向抽帧，默认路径）
+
+只在需要时抽帧，不逐帧扫描整段视频。前提是 `ffmpeg`/`ffprobe` 可用，视频为 run 的 `media/` 中的本地文件；帧图放在 `media/frames/`（被 Git 忽略）。
+
+1. **结尾参考卡**：只看最后 15 秒，每 2 秒一帧。`-sseof` 相对文件末尾，不需要先算时长：
+
+```sh
+mkdir -p media/frames/<source_id>
+ffmpeg -hide_banner -loglevel error -sseof -15 -i media/<source_id>.mp4 -vf "fps=1/2" -q:v 2 media/frames/<source_id>/end_%02d.jpg
+```
+
+读取这些帧，若出现报告名、机构、链接或数据来源，就把它作为该视频的候选出处，并与简介中的链接对照。
+
+2. **屏幕图表（口头未说出出处）**：只对已抽出的、声称“图上 / 表里 / 屏幕上”的断言，取断言出现的时间 `T`（字幕 cue 的起点秒数），在 `T` 处抽 1 帧。若看不清，再在 `[T-5, T+10]` 内补抽，每条断言最多 3 帧：
+
+```sh
+ffmpeg -hide_banner -loglevel error -ss <T> -i media/<source_id>.mp4 -frames:v 1 -q:v 2 media/frames/<source_id>/<claim_id>_<T>.jpg
+```
+
+`-ss` 放在 `-i` 之前是快速定位，精度为关键帧级，足以核对图表标题、单位和坐标轴。用 Read 工具读取图像后记录读数。
+
+3. **记录**：在 claim 的 `visual_evidence` 数组中写入每帧的相对路径、sha256、秒数、可读的标题 / 单位 / 数值（如实转写，看不清的部分留空，不补全），以及 `source_surface`（`on_screen_chart` 或 `end_card`）。`visual_evidence` 不能替代 `original_quote`：创作者没有口述采纳该图时，归属置信度不高于 `medium`，endorsement 用 `unclear`。
+
+4. **成本**：视觉核验只对已标记的断言执行。帧图不进入 Git 跟踪的快照。
 
 ## 参考来源
 

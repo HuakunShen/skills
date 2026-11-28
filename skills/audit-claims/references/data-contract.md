@@ -63,7 +63,7 @@ status=`ready|pending|failed|skipped|truncated`。获取失败保留原元数据
 
 支持 txt/md/srt/vtt/json。JSON 可为 `{text,segments?}`、`[{text,start,duration}]` 或转录示例的 `{response:{text,...}}` 包装。不识别时失败，不当作零观点。多语言 language 可保存字符串或列表；无需翻译才能分析，翻译不能替换原句。
 
-Markdown front matter 保存 source_id/title/source_url/published_at/language/transcript_method/raw_hash，正文保留 cue/paragraph 编号。source_url 本地来源可为 null。具体字段以 normalizer 的结果为准；不以文件名中的日期推断发表日期。source_id 用字母数字下划线连字符，不允许路径穿越。
+Markdown front matter 保存 source_id/title/source_url/published_at/language/transcript_method/raw_hash，可选 `description_origin`（`manifest|info_json`）、`description_locator_id`、`description_sha256`；非空简介作为正文末尾的独立 paragraph 定位段（标注 Uploader description），manifest 可直接给出 `description`，或以 `info_json` 指向相对 manifest 的 yt-dlp info.json，`normalize_sources.py` 读取其 `description` 字段，正文保留 cue/paragraph 编号。可选透传 `media_duration_seconds`、`transcription`（转录引擎/模型/VAD 等对象）与 `quality_flags`（合并自动检测的 `stt_tail_hallucination` / `stt_repeated_cue_hallucination` / `stt_duration_overflow`），明细诊断写入 `sources/<id>.locators.json`。source_url 本地来源可为 null。具体字段以 normalizer 的结果为准；不以文件名中的日期推断发表日期。source_id 用字母数字下划线连字符，不允许路径穿越。
 
 切片需增加 parent_source_id、segment_index、start/end 原文位置和 overlap 范围；片段 ID 不算新一期。覆盖统计按 parent_source_id 回卷，逐片段证明并集覆盖父文本。相同自动字幕滚动片段可去技术重叠，但原始字幕保持不动，并保留原 cue 映射；真实重复表达不能误删。
 
@@ -77,7 +77,7 @@ Markdown front matter 保存 source_id/title/source_url/published_at/language/tr
 
 locator 包含 kind=`timestamp|paragraph|character|page`、start、end；单位和字符编码定义可扩展，时间用相对原媒体的秒数，不是切片内部秒数。自动转录无时间戳时使用段落，不伪造视频秒数。引用要在 raw 或规范化文本中找回；必要时 raw_locator、normalized_locator 同时保存。
 
-endorsement=`endorsed|quoted|rejected|unclear`；转述别人的断言不自动算主讲人的。引用包含的可观察事实（如“某人曾说 X”）可以另建一条关于引述准确性的 claim。
+endorsement=`endorsed|quoted|rejected|mocked|unclear`；转述别人的断言不自动算主讲人的。`mocked` 表示说话者以讽刺、挖苦或反讽方式复述传闻（如把“据消息人士透露”拿来取笑），本人并不认可；它与 `rejected` 一样不进入个人分数，也不计入个人误报或传闻扣分。引用包含的可观察事实（如“某人曾说 X”）可以另建一条关于引述准确性的 claim。
 
 ### Claim
 
@@ -86,8 +86,11 @@ endorsement=`endorsed|quoted|rejected|unclear`；转述别人的断言不自动�
 - 身份：claim_id、subject_id、occurrence_ids、text、domain、claim_type。
 - 归属：empirical、endorsement、attribution_confidence=`high|medium|low`。
 - 两条轴：quantifiability、verifiability；含糊和偏好不能混为一类。
+- 出处与可查证度：可选 `citation_status`（`primary_cited|secondary_cited|uncited_specific|uncited_vague`，或 null）与 `citation_text`（说话者使用的原始出处短语，无则 null）；缺省视为未标注（旧账本兼容）。合并时非法枚举直接报错。
+- 来源层级：可选 `cited_source_tier`（`authoritative_primary|reputable_media|low_credibility_or_rumor|unnamed_insider|none`，或 null）。它是 claim 级字段，计分只读 claim 上的值；occurrence 上可同样标注，作为该原话的副本。缺省视为未标注，非法值直接报错。
 - 可检验性：accountability_eligible（有原文支持的清晰可操作规则）、criteria。
 - 状态：lifecycle、reason、due_for_assessment、outcome、resolved_at、next_check_at。
+- 预测难度与时间：可选 `difficulty`（`trivial|moderate|hard|non_consensus`）、`difficulty_score`（1–5）、`difficulty_rationale`（事前评估理由）、`first_stated_at`、`target_date`；带期限预测须满足 `window_end > first_stated_at`，脚本据此计算 `lead_time_days`。
 - 概率：evaluation_mode=`categorical|probabilistic|none`、probability、probability_origin=`explicit|inferred|none`、event_occurred。
 - 证据：evidence_ids、evidence_quality、review_state=`unreviewed|accepted|needs_review`。
 - 验收：正式 resolved 记录关联 acceptance={decision_path,decision_sha256,policy_hash}。adopt_verdict.py 复算已保存票/裁判决定，并将原记录、证据绑定与决定保存后才写入。

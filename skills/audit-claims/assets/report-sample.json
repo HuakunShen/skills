@@ -97,6 +97,12 @@
     "indeterminate_resolved_n": 5,
     "by_claim_type": {
       "prediction": {
+        "categorical_n": 32,
+        "categorical_counts": {
+          "supported": 18,
+          "contradicted": 9,
+          "mixed": 5
+        },
         "strict_support_rate": {
           "value": 0.5625,
           "numerator": 18,
@@ -104,10 +110,218 @@
         }
       },
       "factual": {
+        "categorical_n": 43,
+        "categorical_counts": {
+          "supported": 29,
+          "contradicted": 9,
+          "mixed": 5
+        },
         "strict_support_rate": {
           "value": 0.6744186046511628,
           "numerator": 29,
           "denominator": 43
+        }
+      }
+    },
+    "prediction_difficulty": {
+      "total_predictions": 38,
+      "rated_n": 36,
+      "unrated_n": 2,
+      "mean_difficulty_score": 2.944,
+      "non_trivial_strict_support_rate": {
+        "value": 0.4166666666666667,
+        "numerator": 10,
+        "denominator": 24,
+        "ci_95": {
+          "low": 0.2447,
+          "high": 0.6117,
+          "level": 0.95
+        }
+      },
+      "trivial_strict_support_rate": {
+        "value": 1.0,
+        "numerator": 8,
+        "denominator": 8,
+        "ci_95": {
+          "low": 0.6756,
+          "high": 1.0,
+          "level": 0.95
+        }
+      },
+      "trivial_share_of_rated_categorical": {
+        "value": 0.25,
+        "numerator": 8,
+        "denominator": 32
+      },
+      "by_tier": {
+        "trivial": {
+          "total_canonical_claims": 8,
+          "categorical_n": 8,
+          "categorical_counts": {
+            "supported": 8,
+            "contradicted": 0,
+            "mixed": 0
+          },
+          "strict_support_rate": {
+            "value": 1.0,
+            "numerator": 8,
+            "denominator": 8,
+            "ci_95": {
+              "low": 0.6756,
+              "high": 1.0,
+              "level": 0.95
+            }
+          },
+          "mean_difficulty_score": 1.0
+        },
+        "moderate": {
+          "total_canonical_claims": 12,
+          "categorical_n": 12,
+          "categorical_counts": {
+            "supported": 7,
+            "contradicted": 3,
+            "mixed": 2
+          },
+          "strict_support_rate": {
+            "value": 0.5833333333333334,
+            "numerator": 7,
+            "denominator": 12,
+            "ci_95": {
+              "low": 0.3195,
+              "high": 0.8067,
+              "level": 0.95
+            }
+          },
+          "mean_difficulty_score": 2.5
+        },
+        "hard": {
+          "total_canonical_claims": 9,
+          "categorical_n": 7,
+          "categorical_counts": {
+            "supported": 2,
+            "contradicted": 3,
+            "mixed": 2
+          },
+          "strict_support_rate": {
+            "value": 0.2857142857142857,
+            "numerator": 2,
+            "denominator": 7,
+            "ci_95": {
+              "low": 0.0822,
+              "high": 0.6411,
+              "level": 0.95
+            }
+          },
+          "mean_difficulty_score": 4.0
+        },
+        "non_consensus": {
+          "total_canonical_claims": 7,
+          "categorical_n": 5,
+          "categorical_counts": {
+            "supported": 1,
+            "contradicted": 3,
+            "mixed": 1
+          },
+          "strict_support_rate": {
+            "value": 0.2,
+            "numerator": 1,
+            "denominator": 5,
+            "ci_95": {
+              "low": 0.0362,
+              "high": 0.6245,
+              "level": 0.95
+            }
+          },
+          "mean_difficulty_score": 5.0
+        }
+      }
+    },
+    "prediction_horizon": {
+      "total_predictions": 38,
+      "dated_n": 34,
+      "undated_n": 4,
+      "unknown_stated_at_n": 0,
+      "mean_lead_time_days": 211.4,
+      "median_lead_time_days": 148.0,
+      "min_lead_time_days": 14.0,
+      "max_lead_time_days": 1020.0,
+      "supported_mean_lead_time_days": 136.5,
+      "supported_median_lead_time_days": 105.0,
+      "buckets": {
+        "le_30d": {
+          "count": 4,
+          "categorical_n": 4,
+          "categorical_counts": {
+            "supported": 4,
+            "contradicted": 0,
+            "mixed": 0
+          },
+          "strict_support_rate": {
+            "value": 1.0,
+            "numerator": 4,
+            "denominator": 4
+          },
+          "mean_lead_time_days": 18.5
+        },
+        "31_90d": {
+          "count": 7,
+          "categorical_n": 7,
+          "categorical_counts": {
+            "supported": 5,
+            "contradicted": 1,
+            "mixed": 1
+          },
+          "strict_support_rate": {
+            "value": 0.7142857142857143,
+            "numerator": 5,
+            "denominator": 7
+          },
+          "mean_lead_time_days": 62.0
+        },
+        "91_180d": {
+          "count": 9,
+          "categorical_n": 9,
+          "categorical_counts": {
+            "supported": 5,
+            "contradicted": 2,
+            "mixed": 2
+          },
+          "strict_support_rate": {
+            "value": 0.5555555555555556,
+            "numerator": 5,
+            "denominator": 9
+          },
+          "mean_lead_time_days": 138.0
+        },
+        "181_365d": {
+          "count": 8,
+          "categorical_n": 7,
+          "categorical_counts": {
+            "supported": 3,
+            "contradicted": 3,
+            "mixed": 1
+          },
+          "strict_support_rate": {
+            "value": 0.42857142857142855,
+            "numerator": 3,
+            "denominator": 7
+          },
+          "mean_lead_time_days": 268.0
+        },
+        "gt_365d": {
+          "count": 6,
+          "categorical_n": 5,
+          "categorical_counts": {
+            "supported": 1,
+            "contradicted": 3,
+            "mixed": 1
+          },
+          "strict_support_rate": {
+            "value": 0.2,
+            "numerator": 1,
+            "denominator": 5
+          },
+          "mean_lead_time_days": 540.0
         }
       }
     },
@@ -221,7 +435,7 @@
         "model_id": "a",
         "model_version": "synthetic-manual",
         "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-        "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
+        "rubric_hash": "b6cec0a1b4a4f0bc4a95903dc2d1e668a7f246f22cf86c0bdf3073525a425aac",
         "score_scale": {
           "min": 0,
           "max": 10
@@ -329,7 +543,7 @@
         "model_id": "b",
         "model_version": "synthetic-manual",
         "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-        "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
+        "rubric_hash": "b6cec0a1b4a4f0bc4a95903dc2d1e668a7f246f22cf86c0bdf3073525a425aac",
         "score_scale": {
           "min": 0,
           "max": 10
@@ -435,7 +649,7 @@
         "model_id": "c",
         "model_version": "synthetic-manual",
         "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-        "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
+        "rubric_hash": "b6cec0a1b4a4f0bc4a95903dc2d1e668a7f246f22cf86c0bdf3073525a425aac",
         "score_scale": {
           "min": 0,
           "max": 10
@@ -541,7 +755,7 @@
       "status": "completed",
       "model_id": "j",
       "data_hash": "32f5a113561bfa83d39b379cfbc19d6ff25b488b53c5c0e92fc6078d070536d8",
-      "rubric_hash": "98e857a07e338b715dbbba503e4f0660539dd07a2f70e0230c0286d6fc77a3ee",
+      "rubric_hash": "b6cec0a1b4a4f0bc4a95903dc2d1e668a7f246f22cf86c0bdf3073525a425aac",
       "score_scale": {
         "min": 0,
         "max": 10
@@ -860,7 +1074,11 @@
       "id": "C01",
       "title": "到期预测：原判据下结算",
       "claim": "2024年底，A城自动配送占比达到10%。",
+      "claim_type": "prediction",
       "status": "contradicted",
+      "difficulty": "non_consensus",
+      "difficulty_score": 5,
+      "lead_time_days": 1020,
       "assessment": "合成汇总值为6.4%，且对象、时间与分母匹配原判据。后续缩小预测范围不改写这条结果。",
       "evidence_ids": [
         "S01",
@@ -872,12 +1090,80 @@
       "id": "C02",
       "title": "未到期概率：保留待结算",
       "claim": "2027年底，封闭园区占比超过20%，概率60%。",
+      "claim_type": "prediction",
       "status": "pending",
+      "difficulty": "hard",
+      "difficulty_score": 4,
+      "lead_time_days": 1046,
       "assessment": "截止日期为2026-11-25，尚未到结果窗口；概率和原始条件已保存，不计入支持率或已观察 Brier。",
       "evidence_ids": [
         "S03"
       ],
       "notes": "pending 同样可以用于触发条件尚未满足的预测。"
+    },
+    {
+      "id": "C05",
+      "title": "中期园区试点：达成阈值（合成）",
+      "claim": "封闭园区试点在公布后 90 天内实现日均 300 单。",
+      "claim_type": "prediction",
+      "status": "supported",
+      "difficulty": "moderate",
+      "difficulty_score": 2,
+      "lead_time_days": 90,
+      "assessment": "合成试点对照材料显示第 82 天达到 318 单，按原定义支持。",
+      "evidence_ids": [
+        "S02",
+        "E02"
+      ],
+      "notes": "合成样本：用于演示支持预测的提前期分布。"
+    },
+    {
+      "id": "C06",
+      "title": "短期成本收敛：部分支持（合成）",
+      "claim": "试点调整后半年内单均运营成本下降 30%。",
+      "claim_type": "prediction",
+      "status": "mixed",
+      "difficulty": "hard",
+      "difficulty_score": 4,
+      "lead_time_days": 180,
+      "assessment": "园区内降幅达 32%，但含交接环节的综合降幅为 18%，按口径归为部分支持。",
+      "evidence_ids": [
+        "S02",
+        "E02"
+      ],
+      "notes": "合成样本：演示混合结果的提前期与难度分层。"
+    },
+    {
+      "id": "C07",
+      "title": "短期道路许可续期（合成）",
+      "claim": "A城现有封闭园区测试许可将在 30 天内获准续期。",
+      "claim_type": "prediction",
+      "status": "supported",
+      "difficulty": "trivial",
+      "difficulty_score": 1,
+      "lead_time_days": 24,
+      "assessment": "常规续期如期公告完成；低难度平凡预测单独分层展示，不掩盖高难度表现。",
+      "evidence_ids": [
+        "S03",
+        "E02"
+      ],
+      "notes": "合成样本：用于演示平凡预测分层。"
+    },
+    {
+      "id": "C08",
+      "title": "季度交付效率预测（合成）",
+      "claim": "半年内园区夜间自动配送准点率稳定在 95% 以上。",
+      "claim_type": "prediction",
+      "status": "supported",
+      "difficulty": "moderate",
+      "difficulty_score": 3,
+      "lead_time_days": 165,
+      "assessment": "合成季度运行记录显示准点率为 96.2%，在截止日满足预设阈值。",
+      "evidence_ids": [
+        "S02",
+        "E02"
+      ],
+      "notes": "合成样本：用于演示箱线图分位数计算。"
     },
     {
       "id": "C03",

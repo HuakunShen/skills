@@ -49,6 +49,41 @@ class NormalizeTests(unittest.TestCase):
         source = ledger.read_jsonl(self.run / 'sources.jsonl')[0]
         self.assertEqual(source['content_hash'], hashlib.sha256((self.run / source['content_path']).read_bytes()).hexdigest())
 
+    def test_manifest_description_is_a_separate_citable_paragraph_after_the_transcript(self):
+        self.ingest([self.item(description='Full report: https://example.org/report.pdf\r\nSource: BLS')])
+        normalized = (self.run / 'sources/a.md').read_text()
+        self.assertIn('Uploader description (written text, not spoken in the video)', normalized)
+        self.assertTrue(normalized.index('Second paragraph.') < normalized.index('[#p-000003]'))
+        sidecar = json.loads((self.run / 'sources/a.locators.json').read_text())
+        self.assertEqual(sidecar['locators'][-1]['origin'], 'video_description')
+        source = ledger.read_jsonl(self.run / 'sources.jsonl')[0]
+        self.assertEqual(source['description_origin'], 'manifest')
+        self.assertEqual(source['description_locator_id'], 'p-000003')
+        self.assertEqual(source['description_sha256'], hashlib.sha256(
+            'Full report: https://example.org/report.pdf\nSource: BLS'.encode('utf-8')).hexdigest())
+        # The description is citable: a quote from it verifies against its own paragraph locator.
+        import audit_pipeline as pipeline
+        ok, basis = pipeline._verify_quote_in_source(normalized, {'kind': 'paragraph', 'start': 3, 'end': 3},
+                                                     'https://example.org/report.pdf')
+        self.assertTrue(ok)
+
+    def test_info_json_description_is_read_from_manifest_relative_file_only(self):
+        (self.inputs / 'a.info.json').write_text(json.dumps({'id': 'x', 'description': 'See FRED series CPIAUCSL.'}),
+                                                encoding='utf-8')
+        self.ingest([self.item(info_json='a.info.json')])
+        source = ledger.read_jsonl(self.run / 'sources.jsonl')[0]
+        self.assertEqual(source['description_origin'], 'info_json')
+        self.assertIn('FRED series CPIAUCSL.', (self.run / 'sources/a.md').read_text())
+        with self.assertRaisesRegex(ValueError, 'must remain under the manifest directory'):
+            self.ingest([self.item(sid='b', info_json='../outside.info.json')])
+
+    def test_sources_without_description_stay_unchanged(self):
+        self.ingest([self.item()])
+        normalized = (self.run / 'sources/a.md').read_text()
+        self.assertNotIn('Uploader description', normalized)
+        source = ledger.read_jsonl(self.run / 'sources.jsonl')[0]
+        self.assertNotIn('description_origin', source)
+
     def test_srt_keeps_overlapping_cues_without_dedup(self):
         srt = '1\n00:00:01,000 --> 00:00:03,000\nHello 世界\n\n2\n00:00:02,000 --> 00:00:04,000\nHello 世界\n'
         self.ingest([self.item(content=srt, extension='srt')])
@@ -191,12 +226,111 @@ class NormalizeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'disagrees'):
             self.ingest([self.item(content=json.dumps(data), extension='json')])
 
+    def test_youtube_vtt_single_space_line_and_rolling_two_line_dedupe(self):
+        vtt = (
+            "WEBVTT\nKind: captions\nLanguage: en\n\n"
+            "00:00:00.760 --> 00:00:02.149 align:start position:0%\n"
+            " \n"
+            "hey<00:00:00.919><c> everyone</c><00:00:01.199><c> welcome</c>\n\n"
+            "00:00:02.149 --> 00:00:02.159 align:start position:0%\n"
+            "hey everyone welcome\n"
+            " \n\n"
+            "00:00:02.159 --> 00:00:04.630 align:start position:0%\n"
+            "hey everyone welcome\n"
+            "to<00:00:02.500><c> the</c><00:00:03.000><c> show</c>\n\n"
+            "00:00:04.630 --> 00:00:04.640 align:start position:0%\n"
+            "to the show\n"
+            " \n\n"
+            "00:00:04.640 --> 00:00:07.150 align:start position:0%\n"
+            "to the show\n"
+            "today<00:00:05.000><c> we</c><00:00:05.500><c> discuss</c>\n\n"
+            "00:00:07.150 --> 00:00:07.160 align:start position:0%\n"
+            " \n\n"
+            "00:00:12.000 --> 00:00:14.000 align:start position:0%\n"
+            "today we discuss\n"
+        )
+        # Must parse without Malformed VTT error even when clean_youtube_vtt=False.
+        self.ingest([self.item('raw_vtt', vtt, 'vtt')], clean_youtube_vtt=False)
+        raw_loc = json.loads((self.run / 'sources/raw_vtt.locators.json').read_text())
+        self.assertEqual(len(raw_loc['locators']), 6)
+        self.assertEqual(raw_loc['skipped_empty_cues'], 1)
+        # With clean_youtube_vtt=True, 2-line rolling duplicates collapse to 1 per line,
+        # while the genuine repeat after a >1s pause (at 12.0s) is preserved.
+        self.ingest([self.item('clean_vtt', vtt, 'vtt')], clean_youtube_vtt=True)
+        clean_md = (self.run / 'sources/clean_vtt.md').read_text()
+        clean_loc = json.loads((self.run / 'sources/clean_vtt.locators.json').read_text())
+        self.assertEqual(len(clean_loc['locators']), 4)
+        self.assertEqual(clean_md.count('hey everyone welcome'), 1)
+        self.assertEqual(clean_md.count('to the show'), 1)
+        self.assertEqual(clean_md.count('today we discuss'), 2)
+
     def test_binary_and_size_limits_prevent_text_mistakes(self):
         with self.assertRaisesRegex(ValueError, 'binary or empty'):
             self.ingest([self.item(content=b'RIFF\x00\x00audio')])
         row = self.item(content='long '*100)
         with self.assertRaisesRegex(ValueError, 'exceeds --max-bytes'):
             self.ingest([row], max_bytes=400)
+
+    def test_stt_tail_hallucination_duration_overflow_and_metadata_passthrough(self):
+        # 5 identical short cues at tail + end_seconds (12.5) > media_duration_seconds (10.0)
+        tail_json = {
+            'segments': [
+                {'id': 0, 'start': 0.0, 'end': 3.0, 'text': '欢迎收看本期节目，我们分析美联储降息预期。'},
+                {'id': 1, 'start': 5.0, 'end': 6.5, 'text': '谢谢观看。'},
+                {'id': 2, 'start': 6.5, 'end': 8.0, 'text': '谢谢观看！'},
+                {'id': 3, 'start': 8.0, 'end': 9.5, 'text': '谢谢观看'},
+                {'id': 4, 'start': 9.5, 'end': 11.0, 'text': '谢谢观看。'},
+                {'id': 5, 'start': 11.0, 'end': 12.5, 'text': '谢谢观看。'},
+            ]
+        }
+        # Mid-transcript 5x repetition (not at tail)
+        mid_json = {
+            'segments': [
+                {'id': 0, 'start': 0.0, 'end': 1.0, 'text': 'Thank you.'},
+                {'id': 1, 'start': 1.0, 'end': 2.0, 'text': 'Thank you.'},
+                {'id': 2, 'start': 2.0, 'end': 3.0, 'text': 'Thank you.'},
+                {'id': 3, 'start': 3.0, 'end': 4.0, 'text': 'Thank you.'},
+                {'id': 4, 'start': 4.0, 'end': 5.0, 'text': 'Thank you.'},
+                {'id': 5, 'start': 5.0, 'end': 9.0, 'text': 'Actual closing commentary.'},
+            ]
+        }
+        # Only 4 identical short cues (below threshold) and within duration -> clean
+        clean_json = {
+            'segments': [
+                {'id': i, 'start': float(i), 'end': float(i + 1), 'text': 'ok'} for i in range(4)
+            ]
+        }
+        stt_meta = {'engine': 'faster-whisper', 'model': 'large-v3', 'vad_filter': True, 'word_timestamps': True}
+        res = self.ingest([
+            self.item('tail_bad', json.dumps(tail_json, ensure_ascii=False), 'json',
+                      media_duration_seconds=10.0, transcription=stt_meta,
+                      quality_flags=['manual_review_requested', 'stt_tail_hallucination']),
+            self.item('mid_bad', json.dumps(mid_json, ensure_ascii=False), 'json',
+                      media_duration_seconds=10.0),
+            self.item('clean_stt', json.dumps(clean_json, ensure_ascii=False), 'json',
+                      media_duration_seconds=10.0, transcription={'engine': 'mlx-whisper'}),
+        ])
+        by_id = {r['source_id']: r for r in ledger.read_jsonl(self.run / 'sources.jsonl')}
+        self.assertEqual(by_id['tail_bad']['transcription'], stt_meta)
+        self.assertEqual(by_id['tail_bad']['media_duration_seconds'], 10.0)
+        # Deduplicated union of provided + auto-detected flags
+        self.assertEqual(by_id['tail_bad']['quality_flags'],
+                         ['manual_review_requested', 'stt_tail_hallucination', 'stt_duration_overflow'])
+        tail_loc = json.loads((self.run / 'sources/tail_bad.locators.json').read_text())
+        self.assertEqual(tail_loc['stt_quality_diagnostics']['duration_overflow']['overflow_cue_count'], 2)
+        self.assertAlmostEqual(tail_loc['stt_quality_diagnostics']['duration_overflow']['overflow_seconds'], 2.5)
+        self.assertTrue(tail_loc['stt_quality_diagnostics']['repeated_short_cue_runs'][0]['at_tail'])
+        # Raw cues are preserved, never silently dropped
+        self.assertEqual(len(tail_loc['locators']), 6)
+        self.assertEqual(by_id['mid_bad']['quality_flags'], ['stt_repeated_cue_hallucination'])
+        self.assertNotIn('quality_flags', by_id['clean_stt'])
+        self.assertEqual(by_id['clean_stt']['transcription'], {'engine': 'mlx-whisper'})
+        self.assertEqual({f['source_id'] for f in res['flagged_sources']}, {'tail_bad', 'mid_bad'})
+        # Invalid metadata rejected
+        with self.assertRaisesRegex(ValueError, 'transcription metadata'):
+            self.ingest([self.item('bad_tr', 'Hello', 'txt', transcription='not-a-dict')])
+        with self.assertRaisesRegex(ValueError, 'quality_flags'):
+            self.ingest([self.item('bad_qf', 'Hello', 'txt', quality_flags='not-a-list')])
 
 
 if __name__ == '__main__':

@@ -210,6 +210,7 @@
             "endorsed",
             "quoted",
             "rejected",
+            "mocked",
             "unclear"
           ]
         },
@@ -375,6 +376,35 @@
             "null"
           ]
         },
+        "target_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "difficulty": {
+          "enum": [
+            "trivial",
+            "moderate",
+            "hard",
+            "non_consensus",
+            null
+          ]
+        },
+        "difficulty_score": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 5
+        },
+        "difficulty_rationale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "evidence_exception": {
           "type": "object",
           "required": [
@@ -391,6 +421,34 @@
             }
           },
           "additionalProperties": true
+        },
+        "citation_status": {
+          "description": "Sourcing rigor of the speaker's assertion: primary_cited = locatable primary source; secondary_cited = media/unnamed/vague third party; uncited_specific = concrete figure or date with no citation; uncited_vague = vague unverifiable assertion with no citation or anchor.",
+          "enum": [
+            "primary_cited",
+            "secondary_cited",
+            "uncited_specific",
+            "uncited_vague",
+            null
+          ]
+        },
+        "citation_text": {
+          "description": "Exact source phrase the speaker used to cite, or null when none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cited_source_tier": {
+          "description": "Source tier of what the speaker cites for this assertion (claim-level; scoring reads this field): authoritative_primary = official/primary record; reputable_media = established outlet naming its source; low_credibility_or_rumor = tabloid, aggregator or unverifiable rumor; unnamed_insider = 据消息人士/知情人士 with no named source; none = no source cited. Null = untagged (legacy).",
+          "enum": [
+            "authoritative_primary",
+            "reputable_media",
+            "low_credibility_or_rumor",
+            "unnamed_insider",
+            "none",
+            null
+          ]
         }
       },
       "required": [
@@ -729,6 +787,7 @@
             "endorsed",
             "quoted",
             "rejected",
+            "mocked",
             "unclear"
           ]
         },
@@ -742,6 +801,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "cited_source_tier": {
+          "description": "Optional copy of the claim's cited_source_tier for this quote (informational; score_claims.py scores the claim-level value).",
+          "enum": [
+            "authoritative_primary",
+            "reputable_media",
+            "low_credibility_or_rumor",
+            "unnamed_insider",
+            "none",
+            null
           ]
         }
       },
@@ -984,6 +1054,29 @@
         "estimated_tokens": {
           "type": "integer",
           "minimum": 1
+        },
+        "media_duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "transcription": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "quality_flags": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "required": [

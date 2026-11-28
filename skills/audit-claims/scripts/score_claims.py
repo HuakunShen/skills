@@ -30,6 +30,38 @@ KINDS = {"factual", "prediction", "causal", "recommendation", "value_judgment",
 LIFECYCLES = {"pending", "ready", "awaiting_evidence", "resolved", "unscorable", "disputed"}
 OUTCOMES = {"supported", "contradicted", "mixed", "indeterminate", None}
 Z_95 = 1.959963984540054
+# Per-claim credit for factual honesty: a contradicted claim with no citation (造谣/无据传谣)
+# loses more than a contradicted claim that cited something (honest error), and mixed
+# verdicts (conflation) sit in between.
+FACTUAL_CREDIT = {"supported": 1.0, "mixed": 0.5, "contradicted": 0.0, "contradicted_uncited": -0.5}
+UNSUBSTANTIATED_STATUSES = {"uncited_specific", "uncited_vague"}
+# Difficulty weights so trivial-only forecasters cannot score high; the score divides by the max weight.
+DIFFICULTY_WEIGHTS = {"trivial": 0.5, "moderate": 1.0, "hard": 2.0, "non_consensus": 3.0}
+DIFFICULTY_MAX_WEIGHT = max(DIFFICULTY_WEIGHTS.values())
+LEAD_TIME_HALF_SCALE_DAYS = 30
+HIGH_CERTAINTY_MARKERS = ("一定", "肯定", "必然", "毫无疑问", "百分之百", "板上钉钉", "100%",
+                          "definitely", "certainly", "certain", "no doubt", "guarantee", "sure")
+HEDGE_MARKERS = ("不一定", "不确定", "可能", "或许", "也许", "unsure", "uncertain", "not sure", "might", "may", "possibly", "perhaps")
+TRAFFIC_LIGHTS = ("green", "yellow", "red")
+# "mocked" = the speaker repeats a rumor only to ridicule or disavow it (sarcasm/irony); like "rejected"
+# it is outside the speaker's own endorsed population, so it never feeds misinformation or backfire rates.
+ENDORSEMENTS = {"endorsed", "quoted", "rejected", "mocked", "unclear"}
+# Backfire (翻车率) = contradicted / categorical: green < 10%, yellow 10%-25%, red > 25%.
+BACKFIRE_LIMITS = (0.10, 0.25)
+# Channel-level engagement health from yt-dlp info.json. Ranges are heuristic benchmarks, not ground truth.
+PLATFORM_FIELDS = {
+    "youtube": {"subscribers": "channel_follower_count", "views": "view_count",
+                "likes": "like_count", "comments": "comment_count", "channel": "channel_id"},
+}
+CHANNEL_BENCHMARKS = {
+    "views_to_subscribers_ratio": (0.10, 0.20),
+    "like_to_view_ratio": (0.015, 0.03),
+    "comment_to_view_ratio": (0.002, 0.005),
+    "engagement_rate": (0.014, 0.035),
+}
+GHOST_SUBSCRIBER_FLOOR = 0.01
+BOT_LIKE_FLOOR = 0.003
+LIKE_SPIKE_CEILING = 0.20
 
 
 def canonical(obj):
@@ -94,7 +126,7 @@ def validate_claim(c):
         "claim_type": KINDS, "lifecycle": LIFECYCLES, "outcome": OUTCOMES,
         "quantifiability": {"numeric", "operationalizable", "qualitative", "none", "unclear"},
         "verifiability": {"verifiable", "conditional", "unverifiable", "unclear"},
-        "endorsement": {"endorsed", "quoted", "rejected", "unclear"},
+        "endorsement": ENDORSEMENTS,
         "attribution_confidence": {"high", "medium", "low"},
         "evaluation_mode": {"categorical", "probabilistic", "none"},
         "probability_origin": {"explicit", "inferred", "none"},
@@ -174,6 +206,35 @@ def validate_claim(c):
                 not finite_number(quality.get(k)) or quality[k] not in (0, 0.5, 1)
                 for k in ("directness", "independence", "traceability")):
             raise ValueError(f"{cid}: evidence_quality requires three scores from 0,0.5,1")
+    difficulty = c.get("difficulty")
+    if difficulty is not None and difficulty not in common.DIFFICULTY_TIERS:
+        raise ValueError(f"{cid}: invalid difficulty tier (expected one of {common.DIFFICULTY_TIERS})")
+    diff_score = c.get("difficulty_score")
+    if diff_score is not None and (type(diff_score) is not int or not 1 <= diff_score <= 5):
+        raise ValueError(f"{cid}: difficulty_score must be an integer from 1 to 5")
+    diff_rat = c.get("difficulty_rationale")
+    if diff_rat is not None and not isinstance(diff_rat, str):
+        raise ValueError(f"{cid}: difficulty_rationale must be a string or null")
+    cit_status = c.get("citation_status")
+    if cit_status is not None and cit_status not in common.CITATION_STATUSES:
+        raise ValueError(f"{cid}: invalid citation_status")
+    cit_text = c.get("citation_text")
+    if cit_text is not None and not isinstance(cit_text, str):
+        raise ValueError(f"{cid}: citation_text must be a string or null")
+    cit_tier = c.get("cited_source_tier")
+    if cit_tier is not None and cit_tier not in common.SOURCE_TIER_WEIGHTS:
+        raise ValueError(f"{cid}: invalid cited_source_tier (expected one of {tuple(common.SOURCE_TIER_WEIGHTS)})")
+    if c["claim_type"] == "prediction":
+        stated_at = common.earliest_stated_at(c)
+        target_end = common.claim_target_deadline(c)
+        if stated_at and target_end:
+            ok, _, detail = common.check_prediction_temporal_order(
+                stated_at, target_end, common.claim_criteria_timezone(c)
+            )
+            if not ok:
+                raise ValueError(
+                    f"{cid}: prediction violates temporal guard ({detail}); reclassify as factual or fix window_end"
+                )
 
 
 def ratio(n, d, with_ci=False):
@@ -246,7 +307,161 @@ def _family_stats(categorical_claims, bootstrap=False, seed=2026):
     }
 
 
-def core_metrics(claims, *, bootstrap_clusters=False):
+def _sourcing_rigor(claims):
+    """Claim-level citation and checkability over endorsed empirical claims (legacy untagged runs stay valid)."""
+    population = [c for c in claims if c["empirical"] and c["endorsement"] == "endorsed"]
+    counts = {k: sum(c.get("citation_status") == k for c in population) for k in common.CITATION_STATUSES}
+    counts["untagged"] = sum(c.get("citation_status") is None for c in population)
+    tagged_n = len(population) - counts["untagged"]
+    checkable_n = sum(c["verifiability"] in {"verifiable", "conditional"} for c in population)
+    primary_n = counts["primary_cited"]
+    cited_n = primary_n + counts["secondary_cited"]
+    unsubstantiated_n = counts["uncited_specific"] + counts["uncited_vague"]
+    return {
+        "population_n": len(population), "tagged_n": tagged_n, "counts": counts,
+        "shares": {k: ratio(counts[k], tagged_n) for k in common.CITATION_STATUSES},
+        "untagged_share": ratio(counts["untagged"], len(population)),
+        "citation_rate": ratio(cited_n, tagged_n, with_ci=True),
+        "primary_citation_rate": ratio(primary_n, tagged_n, with_ci=True),
+        "unsubstantiated_rate": ratio(unsubstantiated_n, tagged_n, with_ci=True),
+        "checkable_rate": ratio(checkable_n, len(population), with_ci=True),
+    }
+
+
+def _source_quality(claims):
+    """Mean weight of the source each endorsed empirical claim cites; untagged claims are excluded, not zero."""
+    population = [c for c in claims if c["empirical"] and c["endorsement"] == "endorsed"]
+    tagged = [c for c in population if c.get("cited_source_tier") is not None]
+    tier_counts = {k: sum(c["cited_source_tier"] == k for c in tagged) for k in common.SOURCE_TIER_WEIGHTS}
+    score = round(100 * statistics.mean(common.SOURCE_TIER_WEIGHTS[c["cited_source_tier"]] for c in tagged), 2) if tagged else None
+    return {
+        "value": score, "scale": [0, 100], "traffic_light": traffic_light(score, scale=100),
+        "population_n": len(population), "tagged_n": len(tagged), "untagged_n": len(population) - len(tagged),
+        "tier_counts": tier_counts, "weights": dict(common.SOURCE_TIER_WEIGHTS),
+        "formula": "100 * mean(tier weight) over endorsed empirical claims with cited_source_tier; none=0.0, untagged excluded",
+        "label": "source_quality_index_not_truth_verdict",
+    }
+
+
+def backfire_light(value):
+    """翻车率 tiers: green < 10%, yellow 10%-25%, red > 25%."""
+    if not finite_number(value):
+        return None
+    low, high = BACKFIRE_LIMITS
+    return "green" if value < low else "yellow" if value <= high else "red"
+
+
+def _backfire(ratio_obj):
+    ratio_obj["traffic_light"] = backfire_light(ratio_obj["value"])
+    return ratio_obj
+
+
+def traffic_light(value, *, error_rate=False, scale=1.0):
+    """Green/yellow/red tier for a fraction, or for a 0-100 score with scale=100.
+
+    Higher-is-better: green >= 80%, yellow 60-79.9%, red < 60%.
+    Error rates (error_rate=True): green < 5%, yellow 5-15%, red > 15%.
+    """
+    if not finite_number(value):
+        return None
+    fraction = value / scale
+    if error_rate:
+        return "green" if fraction < 0.05 else "yellow" if fraction <= 0.15 else "red"
+    return "green" if fraction >= 0.80 else "yellow" if fraction >= 0.60 else "red"
+
+
+def _with_light(ratio_obj, *, error_rate=False):
+    ratio_obj["traffic_light"] = traffic_light(ratio_obj["value"], error_rate=error_rate)
+    return ratio_obj
+
+
+def _is_high_certainty(claim):
+    text = claim.get("certainty_text")
+    if not isinstance(text, str) or not text.strip():
+        return False
+    lowered = text.lower()
+    if any(hedge in lowered for hedge in HEDGE_MARKERS):
+        return False
+    return any(marker.lower() in lowered for marker in HIGH_CERTAINTY_MARKERS)
+
+
+def _factual_credibility(claims):
+    """Anti-misinformation view over adjudicated factual claims only (predictions are scored separately)."""
+    factual = [c for c in claims if c["claim_type"] == "factual"]
+    categorical = _adjudication_sets(factual)[3]
+    n = len(categorical)
+    counts = {v: sum(c["outcome"] == v for c in categorical) for v in ("supported", "contradicted", "mixed")}
+    contradicted = [c for c in categorical if c["outcome"] == "contradicted"]
+    uncited = [c for c in contradicted if c.get("citation_status") in UNSUBSTANTIATED_STATUSES]
+    cited_or_untagged = len(contradicted) - len(uncited)
+    credit_sum = (counts["supported"] * FACTUAL_CREDIT["supported"]
+                  + counts["mixed"] * FACTUAL_CREDIT["mixed"]
+                  + cited_or_untagged * FACTUAL_CREDIT["contradicted"]
+                  + len(uncited) * FACTUAL_CREDIT["contradicted_uncited"])
+    score = round(min(100.0, max(0.0, 100 * credit_sum / n)), 2) if n else None
+    return {
+        "factual_categorical_n": n,
+        "counts": {**counts, "contradicted_uncited": len(uncited)},
+        "small_sample": n < POLICY["minimum_categorical_sample"],
+        "contradiction_rate": _with_light(ratio(len(contradicted), n, with_ci=True), error_rate=True),
+        "misinformation_rate": _with_light(ratio(len(uncited), n, with_ci=True), error_rate=True),
+        "factual_honesty_score": {
+            "value": score, "scale": [0, 100], "traffic_light": traffic_light(score, scale=100),
+            "credit": dict(FACTUAL_CREDIT), "untagged_contradicted_n": sum(c.get("citation_status") is None for c in contradicted),
+            "formula": "100 * mean(credit): supported 1.0, mixed 0.5, cited or untagged contradicted 0.0, uncited contradicted -0.5, clipped to 0-100",
+            "label": "heuristic_credibility_index_not_truth_verdict",
+        },
+    }
+
+
+def _lead_time_weight(days):
+    return math.log2(1 + max(0.0, days) / LEAD_TIME_HALF_SCALE_DAYS)
+
+
+def _difficulty_adjusted(claims):
+    """Forecast accuracy that rewards hard calls and penalizes trivial-only track records."""
+    preds = [c for c in claims if c["claim_type"] == "prediction"]
+    categorical = _adjudication_sets(preds)[3]
+    rated = [c for c in categorical if common.resolve_difficulty_tier(c) in DIFFICULTY_WEIGHTS]
+    n = len(rated)
+    weight_total = sum(DIFFICULTY_WEIGHTS[common.resolve_difficulty_tier(c)] for c in rated)
+    weight_hit = sum(DIFFICULTY_WEIGHTS[common.resolve_difficulty_tier(c)] for c in rated if c["outcome"] == "supported")
+    by_tier = {}
+    for tier, weight in DIFFICULTY_WEIGHTS.items():
+        group = [c for c in rated if common.resolve_difficulty_tier(c) == tier]
+        by_tier[tier] = {"weight": weight, "n": len(group), "supported": sum(c["outcome"] == "supported" for c in group)}
+    score = round(100 * weight_hit / (n * DIFFICULTY_MAX_WEIGHT), 2) if n else None
+    dated = [(c, days) for c in categorical for days in [_lead_time_days(c)] if days is not None]
+    lead_den = sum(_lead_time_weight(days) for _, days in dated)
+    lead_num = sum(_lead_time_weight(days) for c, days in dated if c["outcome"] == "supported")
+    overall = ratio(sum(c["outcome"] == "supported" for c in categorical), len(categorical))["value"]
+    high = [c for c in categorical if _is_high_certainty(c)]
+    high_rate = ratio(sum(c["outcome"] == "supported" for c in high), len(high))["value"]
+    gap = round(overall - high_rate, 6) if overall is not None and high_rate is not None else None
+    return {
+        "weights": dict(DIFFICULTY_WEIGHTS), "max_weight": DIFFICULTY_MAX_WEIGHT,
+        "weighted_n": n, "unrated_excluded_n": len(categorical) - n, "by_tier": by_tier,
+        "weighted_strict_support_rate": round(weight_hit / weight_total, 6) if weight_total else None,
+        "difficulty_exposure": round(weight_total / (n * DIFFICULTY_MAX_WEIGHT), 6) if n else None,
+        "difficulty_adjusted_score": {
+            "value": score, "scale": [0, 100], "traffic_light": traffic_light(score, scale=100),
+            "formula": "100 * sum(weight * supported) / (n * max_weight)",
+        },
+        "lead_time_weighted_support_rate": {
+            "value": round(lead_num / lead_den, 6) if lead_den else None,
+            "numerator": round(lead_num, 4), "denominator": round(lead_den, 4), "dated_n": len(dated),
+            "weight": "log2(1 + max(0, lead_time_days) / 30)",
+        },
+        "overconfidence_gap": {
+            "value": gap, "overall_strict_support_rate": overall, "high_certainty_strict_support_rate": high_rate,
+            "high_certainty_n": len(high), "certainty_text_n": sum(bool(str(c.get("certainty_text") or "").strip()) for c in categorical),
+            "definition": "overall minus high-certainty strict support; positive means high-certainty calls underperform",
+            "marker_source": "heuristic_certainty_text_markers",
+        },
+    }
+
+
+def _adjudication_sets(claims):
     eligible = [c for c in claims if c["empirical"] and c["endorsement"] == "endorsed"
                 and c["attribution_confidence"] == "high"]
     # Exclude exploratory inferred-probability claims from the due denominator so they don't depress coverage.
@@ -258,6 +473,11 @@ def core_metrics(claims, *, bootstrap_clusters=False):
                    and c["outcome"] in {"supported", "contradicted", "mixed"}]
     probability = [c for c in resolved if c["evaluation_mode"] == "probabilistic"
                    and c["probability_origin"] == "explicit" and type(c["event_occurred"]) is bool]
+    return eligible, due, resolved, categorical, probability
+
+
+def core_metrics(claims, *, bootstrap_clusters=False):
+    eligible, due, resolved, categorical, probability = _adjudication_sets(claims)
     indeterminate_resolved = [c for c in due if c["lifecycle"] == "resolved" and c["outcome"] == "indeterminate"]
     adjudicated = categorical + probability
     counts = {v: sum(c["outcome"] == v for c in categorical)
@@ -303,30 +523,132 @@ def core_metrics(claims, *, bootstrap_clusters=False):
         "excluded_from_categorical_accuracy": len(claims) - len(categorical),
         "unaccepted_due_claims": unaccepted_due,
         "quality_blocked_resolutions": sum(c["lifecycle"] == "resolved" and c["outcome"] in {"supported", "contradicted", "mixed"} and not quality_allows_verdict(c) for c in due),
+        "sourcing_rigor": _sourcing_rigor(claims),
+        "source_quality_score": _source_quality(claims),
+        "backfire_rate": _backfire(ratio(counts["contradicted"], len(categorical), with_ci=True)),
     }
 
 
-def _horizon_bucket(c):
-    crit = c.get("criteria") or {}
-    defn = crit.get("definition") or {}
-    start, end = defn.get("window_start"), defn.get("window_end")
-    if not end:
-        return "undated"
-    if not start:
-        return "unknown_start"
+def _lead_time_days(c):
+    stated_at = common.earliest_stated_at(c)
+    target_end = common.claim_target_deadline(c)
+    if not stated_at or not target_end:
+        return None
     try:
-        s_dt = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
-        e_dt = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
-        days = (e_dt - s_dt).total_seconds() / 86400
+        ok, days, _ = common.check_prediction_temporal_order(
+            stated_at, target_end, common.claim_criteria_timezone(c)
+        )
     except ValueError:
+        return None
+    return days if ok else None
+
+
+def _horizon_bucket(c):
+    target_end = common.claim_target_deadline(c)
+    if not target_end:
+        return "undated"
+    stated_at = common.earliest_stated_at(c)
+    if not stated_at:
+        return "unknown_stated_at"
+    days = _lead_time_days(c)
+    if days is None:
         return "unknown"
-    if days <= 30:
-        return "le_30d"
-    if days <= 180:
-        return "1_to_6m"
-    if days <= 730:
-        return "6_to_24m"
-    return "gt_24m"
+    return common.horizon_bucket_for_days(days)
+
+
+def _prediction_difficulty_stats(claims, bootstrap_clusters=False):
+    preds = [c for c in claims if c["claim_type"] == "prediction"]
+    ordered_tiers = (*common.DIFFICULTY_TIERS, "unrated")
+    grouped = {tier: [] for tier in ordered_tiers}
+    for c in preds:
+        grouped[common.resolve_difficulty_tier(c)].append(c)
+    by_tier = {}
+    for tier in ordered_tiers:
+        group = grouped[tier]
+        if not group:
+            continue
+        tier_metrics = core_metrics(group, bootstrap_clusters=bootstrap_clusters)
+        t_scores = [c["difficulty_score"] for c in group if type(c.get("difficulty_score")) is int]
+        tier_metrics["mean_difficulty_score"] = round(statistics.mean(t_scores), 3) if t_scores else None
+        by_tier[tier] = tier_metrics
+    rated = [c for c in preds if common.resolve_difficulty_tier(c) != "unrated"]
+    # Difficulty ratings are subjective: count them per recorded rater model so reports can attribute them.
+    rated_by_model = {}
+    for c in rated:
+        rater = c.get("difficulty_model_id")
+        key = rater if isinstance(rater, str) and rater.strip() else "unrecorded"
+        rated_by_model[key] = rated_by_model.get(key, 0) + 1
+    non_trivial = [c for c in preds if common.resolve_difficulty_tier(c) in {"moderate", "hard", "non_consensus"}]
+    trivial = grouped["trivial"]
+    non_trivial_m = core_metrics(non_trivial, bootstrap_clusters=bootstrap_clusters)
+    trivial_m = core_metrics(trivial, bootstrap_clusters=bootstrap_clusters)
+    scores = [c["difficulty_score"] for c in preds if type(c.get("difficulty_score")) is int]
+    rated_cat_denom = trivial_m["categorical_n"] + non_trivial_m["categorical_n"]
+    return {
+        "total_predictions": len(preds),
+        "rated_n": len(rated),
+        "unrated_n": len(preds) - len(rated),
+        "rated_by_model_id": dict(sorted(rated_by_model.items())),
+        "subjective_rating": True,
+        "mean_difficulty_score": round(statistics.mean(scores), 3) if scores else None,
+        "non_trivial_strict_support_rate": non_trivial_m["strict_support_rate"],
+        "trivial_strict_support_rate": trivial_m["strict_support_rate"],
+        "trivial_share_of_rated_categorical": ratio(trivial_m["categorical_n"], rated_cat_denom),
+        "by_tier": by_tier,
+    }
+
+
+def _prediction_horizon_stats(claims, bootstrap_clusters=False):
+    preds = [c for c in claims if c["claim_type"] == "prediction"]
+    dated = []
+    undated_n = unknown_stated_at_n = 0
+    for c in preds:
+        target_end = common.claim_target_deadline(c)
+        if not target_end:
+            undated_n += 1
+            continue
+        stated_at = common.earliest_stated_at(c)
+        if not stated_at:
+            unknown_stated_at_n += 1
+            continue
+        days = _lead_time_days(c)
+        if days is not None:
+            dated.append((c, days))
+    all_days = [d for _, d in dated]
+    supported_days = [
+        d for c, d in dated
+        if c["empirical"] and c["endorsement"] == "endorsed" and c["attribution_confidence"] == "high"
+        and c["accountability_eligible"] and c["due_for_assessment"]
+        and c["lifecycle"] == "resolved" and c["review_state"] == "accepted"
+        and quality_allows_verdict(c) and c["evaluation_mode"] == "categorical" and c["outcome"] == "supported"
+    ]
+    buckets = {}
+    for b in common.HORIZON_BUCKETS:
+        b_items = [(c, d) for c, d in dated if common.horizon_bucket_for_days(d) == b]
+        b_claims = [c for c, _ in b_items]
+        b_days = [d for _, d in b_items]
+        cm = core_metrics(b_claims, bootstrap_clusters=bootstrap_clusters)
+        buckets[b] = {
+            "count": len(b_claims),
+            "categorical_n": cm["categorical_n"],
+            "categorical_counts": cm["categorical_counts"],
+            "strict_support_rate": cm["strict_support_rate"],
+            "mean_lead_time_days": round(statistics.mean(b_days), 2) if b_days else None,
+            "median_lead_time_days": round(statistics.median(b_days), 2) if b_days else None,
+        }
+    return {
+        "total_predictions": len(preds),
+        "dated_n": len(dated),
+        "undated_n": undated_n,
+        "unknown_stated_at_n": unknown_stated_at_n,
+        "mean_lead_time_days": round(statistics.mean(all_days), 2) if all_days else None,
+        "median_lead_time_days": round(statistics.median(all_days), 2) if all_days else None,
+        "min_lead_time_days": round(min(all_days), 2) if all_days else None,
+        "max_lead_time_days": round(max(all_days), 2) if all_days else None,
+        "supported_mean_lead_time_days": round(statistics.mean(supported_days), 2) if supported_days else None,
+        "supported_median_lead_time_days": round(statistics.median(supported_days), 2) if supported_days else None,
+        "buckets": buckets,
+    }
 
 
 def _period_key(c):
@@ -362,7 +684,90 @@ def validate_policy(p):
         raise ValueError("Composite weights must sum to one")
 
 
-def calculate(claims, coverage, *, composite=False, policy=None, occurrences=None, subject_id=None, bootstrap_clusters=False):
+def read_info_json_dir(path):
+    """Load yt-dlp `*.info.json` records (written by `yt-dlp --write-info-json`) from one directory."""
+    records = []
+    for file in sorted(Path(path).glob("*.info.json")):
+        record = strict_json(file.read_text(encoding="utf-8"))
+        if not isinstance(record, dict):
+            raise ValueError(f"{file.name}: info.json must contain an object")
+        records.append(record)
+    return records
+
+
+def _nonneg(value):
+    return value if finite_number(value) and value >= 0 else None
+
+
+def _benchmark(value, key):
+    low, high = CHANNEL_BENCHMARKS[key]
+    status = None if value is None else "below" if value < low else "above" if value > high else "within"
+    return {"value": None if value is None else round(value, 6), "benchmark": [low, high], "status": status}
+
+
+def channel_stats(records, platform="youtube"):
+    """Channel-level engagement health from per-video yt-dlp metadata. Heuristic, offline, descriptive only."""
+    if platform not in PLATFORM_FIELDS:
+        raise ValueError(f"Unsupported platform for channel_stats: {platform}")
+    fields = PLATFORM_FIELDS[platform]
+    channels = {r[fields["channel"]] for r in records if r.get(fields["channel"])}
+    if len(channels) > 1:
+        raise ValueError("Multiple channels in info.json records: select one channel's videos")
+
+    def values(key):
+        return [v for v in (_nonneg(r.get(fields[key])) for r in records) if v is not None]
+
+    def paired_ratio(*keys):
+        # Pool only videos where the view count and every numerator field are present and views > 0.
+        rows = [r for r in records if _nonneg(r.get(fields["views"]))
+                and all(_nonneg(r.get(fields[k])) is not None for k in keys)]
+        total_views = sum(r[fields["views"]] for r in rows)
+        if not rows or not total_views:
+            return None
+        return sum(r[fields[k]] for r in rows for k in keys) / total_views
+
+    subs, views, likes, comments = values("subscribers"), values("views"), values("likes"), values("comments")
+    subscribers = statistics.median(subs) if subs else None
+    median_views = statistics.median(views) if views else None
+    views_to_subs = median_views / subscribers if median_views is not None and subscribers else None
+    like_ratio = paired_ratio("likes")
+    comment_ratio = paired_ratio("comments")
+    engagement = paired_ratio("likes", "comments")
+    flags = []
+    if views_to_subs is not None and views_to_subs < GHOST_SUBSCRIBER_FLOOR:
+        flags.append("ghost_subscribers")
+    if like_ratio is not None and like_ratio < BOT_LIKE_FLOOR:
+        flags.append("bot_view_inflation")
+    if like_ratio is not None and like_ratio > LIKE_SPIKE_CEILING:
+        flags.append("engagement_spike")
+    measured = any(x is not None for x in (views_to_subs, like_ratio, comment_ratio, engagement))
+    if not flags:
+        flags = ["normal"] if measured else ["insufficient_data"]
+    return {
+        "platform": platform, "channel_id": next(iter(channels), None), "video_n": len(records),
+        "subscribers": subscribers,
+        "avg_views": round(statistics.mean(views), 2) if views else None,
+        "median_views": median_views,
+        "avg_likes": round(statistics.mean(likes), 2) if likes else None,
+        "avg_comments": round(statistics.mean(comments), 2) if comments else None,
+        "views_to_subscribers_ratio": _benchmark(views_to_subs, "views_to_subscribers_ratio"),
+        "like_to_view_ratio": _benchmark(like_ratio, "like_to_view_ratio"),
+        "comment_to_view_ratio": _benchmark(comment_ratio, "comment_to_view_ratio"),
+        "engagement_rate": _benchmark(engagement, "engagement_rate"),
+        "anomaly_flags": flags,
+        "flag_thresholds": {"ghost_subscribers_below": GHOST_SUBSCRIBER_FLOOR,
+                            "bot_view_inflation_like_ratio_below": BOT_LIKE_FLOOR,
+                            "engagement_spike_like_ratio_above": LIKE_SPIKE_CEILING},
+        "formulas": {"views_to_subscribers_ratio": "median per-video view_count / subscribers",
+                     "like_to_view_ratio": "sum(like_count) / sum(view_count) over videos with both",
+                     "comment_to_view_ratio": "sum(comment_count) / sum(view_count) over videos with both",
+                     "engagement_rate": "(sum(like_count) + sum(comment_count)) / sum(view_count) over videos with all three"},
+        "label": "channel_engagement_heuristic_not_authenticity_verdict",
+    }
+
+
+def calculate(claims, coverage, *, composite=False, policy=None, occurrences=None, subject_id=None, bootstrap_clusters=False,
+              channel_records=None):
     policy = POLICY.copy() if policy is None else policy
     validate_policy(policy)
     seen = set()
@@ -423,8 +828,26 @@ def calculate(claims, coverage, *, composite=False, policy=None, occurrences=Non
                             for d in sorted({c["domain"] for c in claims})}
     metrics["by_period"] = {p: core_metrics([c for c in claims if _period_key(c) == p])
                             for p in sorted({_period_key(c) for c in claims})}
-    metrics["by_horizon"] = {h: core_metrics([c for c in claims if _horizon_bucket(c) == h])
-                             for h in sorted({_horizon_bucket(c) for c in claims})}
+    horizon_order = (*common.HORIZON_BUCKETS, "undated", "unknown_stated_at", "unknown")
+    present_horizons = {_horizon_bucket(c) for c in claims}
+    metrics["by_horizon"] = {
+        h: core_metrics([c for c in claims if _horizon_bucket(c) == h])
+        for h in horizon_order if h in present_horizons
+    }
+    diff_order = (*common.DIFFICULTY_TIERS, "unrated")
+    present_diffs = {common.resolve_difficulty_tier(c) for c in claims}
+    metrics["by_difficulty"] = {
+        tier: core_metrics([c for c in claims if common.resolve_difficulty_tier(c) == tier], bootstrap_clusters=bootstrap_clusters)
+        for tier in diff_order if tier in present_diffs
+    }
+    metrics["channel_stats"] = channel_stats(channel_records) if channel_records is not None else None
+    metrics["prediction_difficulty"] = _prediction_difficulty_stats(claims, bootstrap_clusters=bootstrap_clusters)
+    metrics["prediction_horizon"] = _prediction_horizon_stats(claims, bootstrap_clusters=bootstrap_clusters)
+    metrics["factual_credibility"] = _factual_credibility(claims)
+    metrics["prediction_backfire_rate"] = core_metrics(
+        [c for c in claims if c["claim_type"] == "prediction"], bootstrap_clusters=bootstrap_clusters
+    )["backfire_rate"]
+    metrics["difficulty_adjusted"] = _difficulty_adjusted(claims)
     metrics["selection_funnel"] = {
         "total_canonical_claims": len(claims),
         "empirical": sum(1 for c in claims if c["empirical"]),
@@ -448,6 +871,14 @@ def calculate(claims, coverage, *, composite=False, policy=None, occurrences=Non
         warnings.append(f"prediction_vs_factual_gap={abs(pred_rate - fact_rate):.3f}: inspect prediction and factual metrics separately")
     if metrics["not_assessed_operationalization_count"]:
         warnings.append(f"{metrics['not_assessed_operationalization_count']} claims marked not_assessed for operationalization")
+    pdiff = metrics["prediction_difficulty"]
+    triv_share = pdiff["trivial_share_of_rated_categorical"]["value"]
+    triv_rate = pdiff["trivial_strict_support_rate"]["value"]
+    nontriv_rate = pdiff["non_trivial_strict_support_rate"]["value"]
+    if triv_share is not None and triv_share >= 0.30 and (nontriv_rate is None or (triv_rate is not None and triv_rate - nontriv_rate > 0.10)):
+        warnings.append(
+            f"trivial_prediction_inflation: trivial predictions are {triv_share * 100:.1f}% of rated predictions; inspect non_trivial_strict_support_rate separately"
+        )
     metrics["warnings"] = warnings
     metrics["noncheckable_expression_share"] = None
     if occurrences is not None:
@@ -484,15 +915,19 @@ def atomic_write(path, text):
 
 
 def csv_text(claims):
-    cols = ["claim_id", "text", "domain", "claim_type", "family_id", "quantifiability", "verifiability",
-            "lifecycle", "outcome", "probability", "occurrence_ids", "evidence_ids"]
+    cols = ["claim_id", "text", "domain", "claim_type", "family_id", "difficulty", "difficulty_score",
+            "lead_time_days", "quantifiability", "verifiability",
+            "lifecycle", "outcome", "probability", "citation_status", "occurrence_ids", "evidence_ids"]
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=cols)
     writer.writeheader()
     for c in claims:
         row = {}
         for k in cols:
-            v = c.get(k)
+            if k == "lead_time_days":
+                v = c.get(k) if c.get(k) is not None else (_lead_time_days(c) if c.get("claim_type") == "prediction" else None)
+            else:
+                v = c.get(k)
             if isinstance(v, (list, dict)):
                 v = json.dumps(v, ensure_ascii=False)
             if isinstance(v, str) and (v.lstrip().startswith(("=", "+", "-", "@")) or v.startswith(("\t", "\r", "\n"))):
@@ -534,9 +969,24 @@ def score_run(args):
             if claim.get("lifecycle") == "resolved" and claim.get("review_state") == "accepted":
                 verify_acceptance(run, claim, policy_path=args.model_policy, snapshot=snapshot)
                 verified += 1
-        metrics = calculate(claims, coverage, composite=args.composite, policy=policy,
+        # Enrich working copies with earliest source published_at when first_stated_at is absent
+        # so temporal guards and lead-time statistics use real source publication timestamps.
+        occ_by_id = {o["occurrence_id"]: o for o in (occurrences or []) if isinstance(o, dict) and o.get("occurrence_id")}
+        sources_path = run / "sources.jsonl"
+        src_by_id = {s["source_id"]: s for s in audit.read_jsonl(sources_path) if isinstance(s, dict) and s.get("source_id")} if sources_path.exists() else {}
+        enriched_claims = []
+        for c in claims:
+            if not c.get("first_stated_at") and occ_by_id and src_by_id:
+                stated = common.earliest_stated_at(c, occ_by_id, src_by_id, cfg["scope"]["timezone"])
+                if stated:
+                    c = {**c, "first_stated_at": stated}
+            enriched_claims.append(c)
+        enriched_selected = [c for c in enriched_claims if args.subject_id is None or c.get("subject_id") == args.subject_id]
+        info_dir = getattr(args, "info_json_dir", None)
+        metrics = calculate(enriched_claims, coverage, composite=args.composite, policy=policy,
                             occurrences=occurrences, subject_id=args.subject_id,
-                            bootstrap_clusters=getattr(args, "bootstrap_clusters", False))
+                            bootstrap_clusters=getattr(args, "bootstrap_clusters", False),
+                            channel_records=read_info_json_dir(info_dir) if info_dir else None)
         metrics["acceptance_verification"] = {
             "verified_resolutions": verified, "as_of": cfg["scope"]["as_of"],
             "policy": "recomputed_consensus_and_bound_evidence",
@@ -546,7 +996,7 @@ def score_run(args):
                                    for x in [args.claims, args.coverage, args.occurrences] if x}
         atomic_write(args.out, json.dumps(metrics, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
         if args.csv:
-            atomic_write(args.csv, csv_text(selected))
+            atomic_write(args.csv, csv_text(enriched_selected))
     return metrics
 
 
@@ -561,6 +1011,7 @@ def main(argv=None):
     p.add_argument("--csv")
     p.add_argument("--composite", action="store_true")
     p.add_argument("--bootstrap-clusters", action="store_true", help="Compute family_id cluster bootstrap 95%% CI")
+    p.add_argument("--info-json-dir", help="Directory of yt-dlp *.info.json files for one channel -> metrics.json channel_stats")
     p.add_argument("--scoring-policy", help="Full JSON override of the documented heuristic scoring gates")
     p.add_argument("--model-policy", help="Frozen model policy; defaults to RUN/config/model-policy.json")
     args = p.parse_args(argv)

@@ -215,6 +215,403 @@ class ScoreClaimTests(unittest.TestCase):
         self.assertEqual(result['not_assessed_operationalization_count'], 1)
         self.assertEqual(result['adjudication_coverage']['denominator'], 1)
 
+    def test_prediction_difficulty_tiers_validation_and_non_trivial_breakdown(self):
+        rows = [
+            claim('t1', difficulty='trivial', difficulty_score=1,
+                  difficulty_rationale='Near-100% baseline: sun rises in the east.', outcome='supported'),
+            claim('t2', difficulty_score=1, outcome='supported'),
+            claim('m1', difficulty='moderate', difficulty_score=3, outcome='supported'),
+            claim('h1', difficulty='hard', difficulty_score=4, outcome='contradicted'),
+            claim('nc1', difficulty='non_consensus', difficulty_score=5, outcome='contradicted'),
+            claim('f1', claim_type='factual', outcome='supported'),
+        ]
+        result = self.calculate(rows)
+        pdiff = result['prediction_difficulty']
+        self.assertEqual(pdiff['total_predictions'], 5)
+        self.assertEqual(pdiff['rated_n'], 5)
+        self.assertEqual(pdiff['unrated_n'], 0)
+        self.assertAlmostEqual(pdiff['trivial_strict_support_rate']['value'], 1.0)
+        self.assertEqual(pdiff['trivial_strict_support_rate']['denominator'], 2)
+        self.assertAlmostEqual(pdiff['non_trivial_strict_support_rate']['value'], 1 / 3)
+        self.assertEqual(pdiff['non_trivial_strict_support_rate']['denominator'], 3)
+        self.assertAlmostEqual(pdiff['trivial_share_of_rated_categorical']['value'], 0.4)
+        self.assertIn('trivial', pdiff['by_tier'])
+        self.assertIn('non_consensus', pdiff['by_tier'])
+        self.assertTrue(any('trivial_prediction_inflation' in w for w in result['warnings']))
+        for bad_kwargs in (
+            {'difficulty': 'impossible'},
+            {'difficulty_score': 0},
+            {'difficulty_score': 6},
+            {'difficulty_score': True},
+            {'difficulty_rationale': 123},
+        ):
+            with self.subTest(bad=bad_kwargs), self.assertRaises(ValueError):
+                self.calculate([claim('bad', **bad_kwargs)])
+
+    def test_temporal_guard_rejects_retroactive_and_same_day_date_only_predictions(self):
+        def pred_with_dates(cid, stated, end, ctype='prediction'):
+            c = claim(cid, claim_type=ctype, first_stated_at=stated)
+            c['criteria']['definition']['window_end'] = end
+            c['criteria']['sha256'] = hashlib.sha256(scoring.canonical(c['criteria']['definition'])).hexdigest()
+            return c
+
+        # Oct 1 video talking about Sept 30 event cannot be a prediction.
+        with self.assertRaisesRegex(ValueError, 'temporal guard'):
+            self.calculate([pred_with_dates('retro_date', '2025-10-01', '2025-09-30')])
+        # Same-day date-only target cannot be proven post-statement.
+        with self.assertRaisesRegex(ValueError, 'temporal guard'):
+            self.calculate([pred_with_dates('same_day', '2025-10-01T14:00:00Z', '2025-10-01')])
+        # Exact datetime on or before statement time is rejected.
+        with self.assertRaisesRegex(ValueError, 'temporal guard'):
+            self.calculate([pred_with_dates('retro_dt', '2025-10-01T14:00:00Z', '2025-10-01T14:00:00Z')])
+        # Exact intraday datetime strictly after statement is allowed.
+        intraday = pred_with_dates('intraday_ok', '2025-10-01T09:00:00-04:00', '2025-10-01T16:00:00-04:00')
+        res = self.calculate([intraday])
+        self.assertEqual(res['prediction_horizon']['dated_n'], 1)
+        self.assertAlmostEqual(res['prediction_horizon']['mean_lead_time_days'], 0.29, places=2)
+        # Factual claim about a past event is completely valid.
+        fact = pred_with_dates('fact_past', '2025-10-01', '2025-09-30', ctype='factual')
+        self.assertEqual(self.calculate([fact])['categorical_n'], 1)
+
+    def test_prediction_lead_time_and_horizon_buckets(self):
+        def dated_pred(cid, stated, end, outcome='supported', difficulty=None, score=None):
+            c = claim(cid, first_stated_at=stated, outcome=outcome)
+            if difficulty is not None:
+                c['difficulty'] = difficulty
+            if score is not None:
+                c['difficulty_score'] = score
+            c['criteria']['definition']['window_end'] = end
+            c['criteria']['sha256'] = hashlib.sha256(scoring.canonical(c['criteria']['definition'])).hexdigest()
+            return c
+
+        undated = claim('u1', first_stated_at='2025-01-01', outcome='supported')
+        undated['criteria']['definition']['window_end'] = None
+        undated['criteria']['sha256'] = hashlib.sha256(scoring.canonical(undated['criteria']['definition'])).hexdigest()
+
+        rows = [
+            dated_pred('p15', '2025-01-01', '2025-01-16', 'supported', 'moderate', 3),       # 15d -> le_30d
+            dated_pred('p60', '2025-01-01', '2025-03-02', 'contradicted', 'hard', 4),         # 60d -> 31_90d
+            dated_pred('p120', '2025-01-01', '2025-05-01', 'supported', 'hard', 4),           # 120d -> 91_180d
+            dated_pred('p240', '2025-01-01', '2025-08-29', 'supported', 'non_consensus', 5),  # 240d -> 181_365d
+            dated_pred('p400', '2024-01-01', '2025-02-04', 'contradicted', 'non_consensus', 5),  # 400d -> gt_365d
+            undated,
+        ]
+        res = self.calculate(rows)
+        ph = res['prediction_horizon']
+        self.assertEqual(ph['total_predictions'], 6)
+        self.assertEqual(ph['dated_n'], 5)
+        self.assertEqual(ph['undated_n'], 1)
+        self.assertAlmostEqual(ph['mean_lead_time_days'], 167.0)
+        self.assertAlmostEqual(ph['median_lead_time_days'], 120.0)
+        self.assertAlmostEqual(ph['min_lead_time_days'], 15.0)
+        self.assertAlmostEqual(ph['max_lead_time_days'], 400.0)
+        # Supported predictions: 15, 120, 240 -> mean 125.0, median 120.0
+        self.assertAlmostEqual(ph['supported_mean_lead_time_days'], 125.0)
+        self.assertAlmostEqual(ph['supported_median_lead_time_days'], 120.0)
+        self.assertEqual(ph['buckets']['le_30d']['count'], 1)
+        self.assertEqual(ph['buckets']['le_30d']['strict_support_rate']['value'], 1.0)
+        self.assertEqual(ph['buckets']['31_90d']['strict_support_rate']['value'], 0.0)
+        self.assertEqual(ph['buckets']['91_180d']['strict_support_rate']['value'], 1.0)
+        self.assertEqual(ph['buckets']['181_365d']['strict_support_rate']['value'], 1.0)
+        self.assertEqual(ph['buckets']['gt_365d']['strict_support_rate']['value'], 0.0)
+        self.assertEqual(set(res['by_horizon']), {'le_30d', '31_90d', '91_180d', '181_365d', 'gt_365d', 'undated'})
+        exported = list(csv.DictReader(io.StringIO(scoring.csv_text(rows))))
+        by_id = {r['claim_id']: r for r in exported}
+        self.assertEqual(by_id['p120']['difficulty'], 'hard')
+        self.assertEqual(by_id['p120']['difficulty_score'], '4')
+        self.assertEqual(float(by_id['p120']['lead_time_days']), 120.0)
+
+
+class SourcingRigorTests(unittest.TestCase):
+    def test_citation_counts_rates_and_checkability_with_untagged_legacy_claims(self):
+        rows = [
+            claim('primary', citation_status='primary_cited', verifiability='verifiable'),
+            claim('secondary', citation_status='secondary_cited', verifiability='unverifiable'),
+            claim('specific', citation_status='uncited_specific', verifiability='conditional'),
+            claim('vague', citation_status='uncited_vague', verifiability='unverifiable'),
+            claim('legacy', verifiability='verifiable'),
+            # Quoted or non-empirical statements are outside the speaker's own endorsed empirical population.
+            claim('quoted', citation_status='primary_cited', endorsement='quoted'),
+            claim('opinion', citation_status='uncited_vague', empirical=False, claim_type='preference'),
+        ]
+        sr = scoring.core_metrics(rows)['sourcing_rigor']
+        self.assertEqual(sr['population_n'], 5)
+        self.assertEqual(sr['tagged_n'], 4)
+        self.assertEqual(sr['counts'], {'primary_cited': 1, 'secondary_cited': 1, 'uncited_specific': 1,
+                                        'uncited_vague': 1, 'untagged': 1})
+        self.assertAlmostEqual(sr['citation_rate']['value'], 0.5)
+        self.assertAlmostEqual(sr['primary_citation_rate']['value'], 0.25)
+        self.assertAlmostEqual(sr['unsubstantiated_rate']['value'], 0.5)
+        self.assertAlmostEqual(sr['checkable_rate']['value'], 3 / 5)
+        self.assertAlmostEqual(sr['untagged_share']['value'], 1 / 5)
+        self.assertAlmostEqual(sr['shares']['uncited_specific']['value'], 0.25)
+        self.assertIsNotNone(sr['citation_rate']['ci_95'])
+
+    def test_sourcing_rigor_is_reported_overall_and_per_group(self):
+        rows = [claim('p1', claim_type='prediction', citation_status='uncited_specific'),
+                claim('p2', claim_type='prediction', citation_status='primary_cited'),
+                claim('f1', claim_type='factual', citation_status='secondary_cited')]
+        result = scoring.calculate(rows, copy.deepcopy(COVERAGE))
+        self.assertEqual(result['sourcing_rigor']['tagged_n'], 3)
+        self.assertAlmostEqual(result['by_claim_type']['prediction']['sourcing_rigor']['unsubstantiated_rate']['value'], 0.5)
+        self.assertAlmostEqual(result['by_claim_type']['factual']['sourcing_rigor']['citation_rate']['value'], 1.0)
+        self.assertEqual(result['by_claim_type']['factual']['sourcing_rigor']['tagged_n'], 1)
+
+    def test_legacy_ledger_without_citation_tags_is_not_a_zero_rate(self):
+        rows = [claim('a'), vague('b')]
+        result = scoring.calculate(rows, copy.deepcopy(COVERAGE))
+        sr = result['sourcing_rigor']
+        self.assertEqual(sr['tagged_n'], 0)
+        self.assertEqual(sr['counts']['untagged'], 2)
+        self.assertIsNone(sr['citation_rate']['value'])
+        self.assertIsNone(sr['unsubstantiated_rate']['value'])
+        self.assertAlmostEqual(sr['checkable_rate']['value'], 1 / 2)
+
+    def test_citation_fields_are_validated_and_exported(self):
+        with self.assertRaises(ValueError):
+            scoring.validate_claim(claim('bad_status', citation_status='hearsay'))
+        with self.assertRaises(ValueError):
+            scoring.validate_claim(claim('bad_text', citation_status='primary_cited', citation_text=['x']))
+        scoring.validate_claim(claim('ok', citation_status='primary_cited', citation_text='Reuters report'))
+        exported = list(csv.DictReader(io.StringIO(scoring.csv_text(
+            [claim('ok', citation_status='uncited_vague')]))))
+        self.assertEqual(exported[0]['citation_status'], 'uncited_vague')
+
+
+
+
+class CredibilityAndDifficultyTests(unittest.TestCase):
+    def calculate(self, rows):
+        return scoring.calculate(rows, copy.deepcopy(COVERAGE))
+
+    def test_traffic_light_thresholds_for_rates_scores_and_error_rates(self):
+        self.assertEqual(scoring.traffic_light(0.80), 'green')
+        self.assertEqual(scoring.traffic_light(0.7999), 'yellow')
+        self.assertEqual(scoring.traffic_light(0.60), 'yellow')
+        self.assertEqual(scoring.traffic_light(0.5999), 'red')
+        self.assertEqual(scoring.traffic_light(85, scale=100), 'green')
+        self.assertEqual(scoring.traffic_light(59.9, scale=100), 'red')
+        self.assertEqual(scoring.traffic_light(0.04, error_rate=True), 'green')
+        self.assertEqual(scoring.traffic_light(0.05, error_rate=True), 'yellow')
+        self.assertEqual(scoring.traffic_light(0.15, error_rate=True), 'yellow')
+        self.assertEqual(scoring.traffic_light(0.1501, error_rate=True), 'red')
+        self.assertIsNone(scoring.traffic_light(None))
+
+    def test_factual_credibility_ignores_predictions_and_penalizes_uncited_contradictions(self):
+        rows = [
+            claim('fs', claim_type='factual', outcome='supported', citation_status='primary_cited'),
+            claim('fm', claim_type='factual', outcome='mixed', citation_status='secondary_cited'),
+            claim('fc', claim_type='factual', outcome='contradicted', citation_status='secondary_cited'),
+            claim('fu', claim_type='factual', outcome='contradicted', citation_status='uncited_specific'),
+            claim('p1', outcome='contradicted', citation_status='uncited_specific'),
+        ]
+        fc = self.calculate(rows)['factual_credibility']
+        self.assertEqual(fc['factual_categorical_n'], 4)
+        self.assertEqual(fc['counts'], {'supported': 1, 'mixed': 1, 'contradicted': 2, 'contradicted_uncited': 1})
+        self.assertAlmostEqual(fc['contradiction_rate']['value'], 0.5)
+        self.assertAlmostEqual(fc['misinformation_rate']['value'], 0.25)
+        self.assertEqual(fc['contradiction_rate']['traffic_light'], 'red')
+        self.assertEqual(fc['misinformation_rate']['traffic_light'], 'red')
+        # credit = 1.0 (supported) + 0.5 (mixed) + 0.0 (cited contradiction) - 0.5 (uncited) = 1.0 of 4
+        self.assertAlmostEqual(fc['factual_honesty_score']['value'], 25.0)
+        self.assertEqual(fc['factual_honesty_score']['traffic_light'], 'red')
+
+    def test_honesty_penalty_orders_uncited_below_cited_contradiction_below_mixed(self):
+        def score(outcome, status):
+            # A supported anchor keeps the population above the 0-100 clipping floor.
+            rows = [claim('anchor', claim_type='factual', outcome='supported', citation_status='primary_cited'),
+                    claim('f', claim_type='factual', outcome=outcome, citation_status=status)]
+            return self.calculate(rows)['factual_credibility']['factual_honesty_score']['value']
+        self.assertAlmostEqual(score('mixed', 'secondary_cited'), 75.0)
+        self.assertAlmostEqual(score('contradicted', 'secondary_cited'), 50.0)
+        self.assertAlmostEqual(score('contradicted', 'uncited_vague'), 25.0)
+        self.assertGreater(score('mixed', 'secondary_cited'), score('contradicted', 'primary_cited'))
+        self.assertGreater(score('contradicted', 'primary_cited'), score('contradicted', 'uncited_vague'))
+
+    def test_difficulty_weighting_stops_trivial_only_track_records_from_scoring_high(self):
+        def pred(cid, tier, outcome='supported'):
+            return claim(cid, first_stated_at='2025-01-01', difficulty=tier, outcome=outcome)
+        trivial_only = [pred(f't{i}', 'trivial') for i in range(3)]
+        hard_only = [pred(f'h{i}', 'hard') for i in range(3)]
+        trivial = self.calculate(trivial_only)['difficulty_adjusted']
+        hard = self.calculate(hard_only)['difficulty_adjusted']
+        self.assertAlmostEqual(trivial['difficulty_adjusted_score']['value'], round(100 * 0.5 / 3, 2))
+        self.assertAlmostEqual(hard['difficulty_adjusted_score']['value'], round(100 * 2.0 / 3, 2))
+        self.assertEqual(trivial['weighted_strict_support_rate'], 1.0)
+        self.assertLess(trivial['difficulty_exposure'], hard['difficulty_exposure'])
+        self.assertLess(trivial['difficulty_adjusted_score']['value'], hard['difficulty_adjusted_score']['value'])
+
+    def test_unrated_predictions_are_excluded_from_weighted_score_but_counted(self):
+        rows = [claim('r1', first_stated_at='2025-01-01', difficulty='non_consensus', outcome='supported'),
+                claim('u1', first_stated_at='2025-01-01', outcome='contradicted')]
+        da = self.calculate(rows)['difficulty_adjusted']
+        self.assertEqual(da['weighted_n'], 1)
+        self.assertEqual(da['unrated_excluded_n'], 1)
+        self.assertAlmostEqual(da['difficulty_adjusted_score']['value'], 100.0)
+
+    def test_overconfidence_gap_uses_certainty_markers_and_respects_hedges(self):
+        rows = [
+            claim('c1', first_stated_at='2025-01-01', outcome='contradicted', certainty_text='我一定会做到'),
+            claim('c2', first_stated_at='2025-01-01', outcome='supported', certainty_text='毫无疑问'),
+            claim('p1', first_stated_at='2025-01-01', outcome='supported'),
+            claim('p2', first_stated_at='2025-01-01', outcome='supported', certainty_text='不一定'),
+        ]
+        gap = self.calculate(rows)['difficulty_adjusted']['overconfidence_gap']
+        self.assertEqual(gap['high_certainty_n'], 2)
+        self.assertAlmostEqual(gap['high_certainty_strict_support_rate'], 0.5)
+        self.assertAlmostEqual(gap['overall_strict_support_rate'], 0.75)
+        self.assertAlmostEqual(gap['value'], 0.25)
+        self.assertFalse(scoring._is_high_certainty(claim('h', certainty_text='不一定会发生')))
+        self.assertIsNone(self.calculate([claim('n1', first_stated_at='2025-01-01')])['difficulty_adjusted']['overconfidence_gap']['value'])
+
+    def test_lead_time_weighted_support_uses_log_weights_on_dated_predictions(self):
+        rows = [claim('a', first_stated_at='2025-01-01', outcome='supported'),
+                claim('b', first_stated_at='2025-01-01', outcome='contradicted')]
+        lead = self.calculate(rows)['difficulty_adjusted']['lead_time_weighted_support_rate']
+        self.assertEqual(lead['dated_n'], 2)
+        self.assertGreater(lead['denominator'], 0)
+        self.assertGreater(lead['value'], 0)
+        self.assertLess(lead['value'], 1)
+        self.assertEqual(lead['weight'], 'log2(1 + max(0, lead_time_days) / 30)')
+
+    def test_legacy_runs_without_new_fields_report_null_not_zero(self):
+        m = self.calculate([claim('legacy', claim_type='factual', outcome='supported')])
+        self.assertIsNone(m['difficulty_adjusted']['difficulty_adjusted_score']['value'])
+        self.assertAlmostEqual(m['factual_credibility']['factual_honesty_score']['value'], 100.0)
+        self.assertIsNone(self.calculate([claim('p')])['factual_credibility']['factual_honesty_score']['value'])
+
+    def test_difficulty_ratings_are_attributed_to_recording_models(self):
+        rows = [claim('m1', first_stated_at='2025-01-01', difficulty='hard', difficulty_model_id='model_a'),
+                claim('m2', first_stated_at='2025-01-01', difficulty='hard', difficulty_model_id='model_a'),
+                claim('m3', first_stated_at='2025-01-01', difficulty='moderate')]
+        raters = self.calculate(rows)['prediction_difficulty']['rated_by_model_id']
+        self.assertEqual(raters, {'model_a': 2, 'unrecorded': 1})
+
+
+class BackfireSourceAndChannelTests(unittest.TestCase):
+    def test_backfire_rate_is_contradicted_over_categorical_with_traffic_light_tiers(self):
+        rows = [claim('s1', claim_type='factual', outcome='supported'),
+                claim('s2', claim_type='factual', outcome='supported'),
+                claim('m1', claim_type='factual', outcome='mixed'),
+                claim('c1', claim_type='factual', outcome='contradicted')]
+        rate = scoring.core_metrics(rows)['backfire_rate']
+        self.assertEqual((rate['numerator'], rate['denominator']), (1, 4))
+        self.assertAlmostEqual(rate['value'], 0.25)
+        self.assertEqual(rate['traffic_light'], 'yellow')
+        self.assertEqual(scoring.backfire_light(0.0999), 'green')
+        self.assertEqual(scoring.backfire_light(0.10), 'yellow')
+        self.assertEqual(scoring.backfire_light(0.25), 'yellow')
+        self.assertEqual(scoring.backfire_light(0.2501), 'red')
+        self.assertIsNone(scoring.backfire_light(None))
+
+    def test_prediction_backfire_rate_is_split_from_factual_backfire(self):
+        rows = [claim('p1', claim_type='prediction', outcome='contradicted'),
+                claim('p2', claim_type='prediction', outcome='supported'),
+                claim('p3', claim_type='prediction', outcome='supported'),
+                claim('p4', claim_type='prediction', outcome='supported'),
+                claim('f1', claim_type='factual', outcome='contradicted'),
+                claim('f2', claim_type='factual', outcome='supported')]
+        result = scoring.calculate(rows, copy.deepcopy(COVERAGE))
+        self.assertAlmostEqual(result['prediction_backfire_rate']['value'], 0.25)
+        self.assertEqual(result['prediction_backfire_rate']['denominator'], 4)
+        self.assertAlmostEqual(result['backfire_rate']['value'], 2 / 6)
+        self.assertEqual(result['backfire_rate']['traffic_light'], 'red')
+
+    def test_mocked_rumor_is_excluded_from_speaker_misinformation_and_backfire(self):
+        mocked = claim('rumor', claim_type='factual', outcome='contradicted', citation_status='uncited_vague',
+                       endorsement='mocked', cited_source_tier='unnamed_insider')
+        rejected = claim('rej', claim_type='factual', outcome='contradicted', citation_status='uncited_vague',
+                         endorsement='rejected')
+        scoring.validate_claim(mocked)
+        result = scoring.calculate([mocked, rejected, claim('ok', claim_type='factual', outcome='supported')],
+                                   copy.deepcopy(COVERAGE))
+        self.assertEqual(result['factual_credibility']['misinformation_rate']['numerator'], 0)
+        self.assertEqual(result['factual_credibility']['counts']['contradicted_uncited'], 0)
+        self.assertEqual(result['backfire_rate']['numerator'], 0)
+        self.assertEqual(result['selection_funnel']['endorsed_empirical'], 1)
+        with self.assertRaises(ValueError):
+            scoring.validate_claim(claim('bad_endorsement', endorsement='sarcastic'))
+
+    def test_source_quality_score_uses_tier_weights_and_excludes_untagged_and_mocked(self):
+        tiers = ['authoritative_primary', 'reputable_media', 'low_credibility_or_rumor', 'unnamed_insider', 'none']
+        rows = [claim(f'c{i}', cited_source_tier=tier) for i, tier in enumerate(tiers)]
+        rows.append(claim('untagged'))
+        rows.append(claim('mocked_rumor', endorsement='mocked', cited_source_tier='unnamed_insider'))
+        sq = scoring.core_metrics(rows)['source_quality_score']
+        self.assertAlmostEqual(sq['value'], 42.0)
+        self.assertEqual((sq['tagged_n'], sq['untagged_n'], sq['population_n']), (5, 1, 6))
+        self.assertEqual(sq['tier_counts']['none'], 1)
+        self.assertEqual(sq['traffic_light'], 'red')
+        legacy = scoring.core_metrics([claim('a'), vague('b')])['source_quality_score']
+        self.assertIsNone(legacy['value'])
+        self.assertEqual(legacy['tagged_n'], 0)
+        with self.assertRaises(ValueError):
+            scoring.validate_claim(claim('bad_tier', cited_source_tier='tabloid'))
+
+    def test_channel_stats_aggregates_yt_dlp_fields_and_flags_ghost_subscribers(self):
+        records = [{'channel_id': 'UC1', 'channel_follower_count': 1_000_000, 'view_count': v,
+                    'like_count': v // 50, 'comment_count': v // 500} for v in (4000, 6000, 5000)]
+        stats = scoring.channel_stats(records)
+        self.assertEqual(stats['platform'], 'youtube')
+        self.assertEqual(stats['video_n'], 3)
+        self.assertEqual(stats['subscribers'], 1_000_000)
+        self.assertEqual(stats['median_views'], 5000)
+        self.assertAlmostEqual(stats['avg_views'], 5000.0)
+        self.assertAlmostEqual(stats['avg_likes'], 100.0)
+        self.assertAlmostEqual(stats['views_to_subscribers_ratio']['value'], 0.005)
+        self.assertEqual(stats['views_to_subscribers_ratio']['status'], 'below')
+        self.assertAlmostEqual(stats['like_to_view_ratio']['value'], 0.02)
+        self.assertEqual(stats['like_to_view_ratio']['status'], 'within')
+        self.assertAlmostEqual(stats['comment_to_view_ratio']['value'], 0.002)
+        self.assertAlmostEqual(stats['engagement_rate']['value'], 0.022)
+        self.assertEqual(stats['anomaly_flags'], ['ghost_subscribers'])
+
+    def test_channel_stats_flags_bot_view_inflation_engagement_spike_and_normal(self):
+        bots = [{'channel_id': 'UC2', 'channel_follower_count': 50_000, 'view_count': 100_000,
+                 'like_count': 10, 'comment_count': 2}]
+        self.assertEqual(scoring.channel_stats(bots)['anomaly_flags'], ['bot_view_inflation'])
+        spike = [{'channel_id': 'UC3', 'channel_follower_count': 5_000, 'view_count': 1_000,
+                  'like_count': 300, 'comment_count': 5}]
+        self.assertEqual(scoring.channel_stats(spike)['anomaly_flags'], ['engagement_spike'])
+        healthy = [{'channel_id': 'UC4', 'channel_follower_count': 10_000, 'view_count': 1_500,
+                    'like_count': 30, 'comment_count': 3}]
+        healthy_stats = scoring.channel_stats(healthy)
+        self.assertEqual(healthy_stats['anomaly_flags'], ['normal'])
+        self.assertEqual(healthy_stats['views_to_subscribers_ratio']['status'], 'within')
+        self.assertEqual(scoring.channel_stats([{'channel_id': 'UC5'}])['anomaly_flags'], ['insufficient_data'])
+
+    def test_channel_stats_pools_only_videos_with_the_needed_fields_and_rejects_mixed_channels(self):
+        records = [{'channel_id': 'UC6', 'channel_follower_count': 2_000, 'view_count': 1_000, 'like_count': 40, 'comment_count': None},
+                   {'channel_id': 'UC6', 'channel_follower_count': 2_000, 'view_count': 3_000, 'like_count': None, 'comment_count': 9}]
+        stats = scoring.channel_stats(records)
+        self.assertEqual(stats['avg_views'], 2000.0)
+        self.assertAlmostEqual(stats['avg_comments'], 9.0)
+        self.assertAlmostEqual(stats['like_to_view_ratio']['value'], 0.04)
+        self.assertAlmostEqual(stats['comment_to_view_ratio']['value'], 0.003)
+        self.assertIsNone(stats['engagement_rate']['value'])
+        with self.assertRaises(ValueError):
+            scoring.channel_stats([{'channel_id': 'UCa'}, {'channel_id': 'UCb'}])
+        with self.assertRaises(ValueError):
+            scoring.channel_stats(records, platform='myspace')
+
+    def test_channel_records_flow_into_metrics_only_when_provided(self):
+        records = [{'channel_id': 'UC7', 'channel_follower_count': 10_000, 'view_count': 1_500, 'like_count': 30}]
+        with_info = scoring.calculate([claim('a')], copy.deepcopy(COVERAGE), channel_records=records)
+        self.assertEqual(with_info['channel_stats']['subscribers'], 10_000)
+        self.assertIsNone(scoring.calculate([claim('a')], copy.deepcopy(COVERAGE))['channel_stats'])
+
+    def test_read_info_json_dir_loads_only_info_files_and_rejects_non_objects(self):
+        import tempfile
+        from pathlib import Path as _Path
+        with tempfile.TemporaryDirectory() as tmp:
+            _Path(tmp, 'v1.info.json').write_text('{"channel_id": "UC9", "view_count": 7}', encoding='utf-8')
+            _Path(tmp, 'notes.txt').write_text('ignored', encoding='utf-8')
+            records = scoring.read_info_json_dir(tmp)
+            self.assertEqual(records, [{'channel_id': 'UC9', 'view_count': 7}])
+            _Path(tmp, 'v2.info.json').write_text('[1, 2]', encoding='utf-8')
+            with self.assertRaises(ValueError):
+                scoring.read_info_json_dir(tmp)
+
 
 if __name__ == '__main__':
     unittest.main()

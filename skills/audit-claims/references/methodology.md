@@ -27,14 +27,16 @@
 
 每条观点保留：原话、语言、说话者、发表时间、源链接、本地材料、段落/行号或时间戳、前后语境、否定和条件。机器转录中涉及人名、数量、日期、否定词的疑点先回听或标记不确定；不得把转录错误判给说话者。
 
-多人节目逐句归属。主持人转述嘉宾、引用对手或读新闻，并不自动等于赞同。用 `endorsement = endorsed | quoted | rejected | unclear`；用 `attribution_confidence = high | medium | low`。归属不明的观点仍保存，但不计入个人分数。
+多人节目逐句归属。主持人转述嘉宾、引用对手或读新闻，并不自动等于赞同。用 `endorsement = endorsed | quoted | rejected | mocked | unclear`；用 `attribution_confidence = high | medium | low`。归属不明的观点仍保存，但不计入个人分数。
+
+讽刺与嘲讽不是赞同：说话者若以反讽、挖苦或戏仿方式复述传闻（如拿“据消息人士透露”“知情人士称”取笑），应标为 `endorsement = mocked`（或 `rejected`）。这类条目被排除在个人分数之外，既不进入事实诚信分，也不计入误报率、传闻扣分或翻车率。
 
 ### 主类型与独立标签
 
 | `claim_type` | 含义 | 处理方式 |
 | --- | --- | --- |
 | `factual` | 关于已发生或当前状态的经验断言 | 数值与定性断言均可核验；保留其适用时间 |
-| `prediction` | 对尚未发生事件或状态的预测 | 提取目标、期限、条件、确信程度 |
+| `prediction` | 对尚未发生事件或状态的预测（**严格时间护栏**：目标/截止日须严格晚于 `first_stated_at` / `published_at`，已过去事件归 `factual`） | 提取目标、期限、条件、确信程度及事前难度（`difficulty`） |
 | `causal` | A 导致 B、机制或反事实解释 | 不把相关性或先后顺序直接当成因果证据 |
 | `recommendation` | 应该做什么、如何选择 | 将经验前提拆出；建议本身不自动判真假 |
 | `value_judgment` | 公平、好坏、值得与否等规范判断 | 记录价值标准；通常不进入事实准确率 |
@@ -50,6 +52,23 @@
 - `verifiability = verifiable | conditional | unverifiable | unclear`。`conditional` 要有可观察的触发条件及触发后的判定规则；没有证据渠道不自动等于不可验证。
 
 设置 `empirical` 表示是否对外部世界作出可讨论证据的断言。价值判断夹带事实前提时，把前提拆为 `empirical=true` 的独立记录。分类是对言论的分析结果，也应允许复核和修订。
+
+### 出处与可查证度（张口就来）
+
+对每条 `empirical=true` 的断言标注 `citation_status` 与 `citation_text`（说话者使用的原始出处短语，无则 null）：
+
+- `primary_cited`：引用可定位的一手来源（机构 + 报告/日期/表格/URL）。
+- `secondary_cited`：引用二手媒体、未具名报告或模糊第三方来源。
+- `uncited_specific`：给出具体数字或日期却零引用，即“张口就来”的具体断言。
+- `uncited_vague`：含糊断言，无引用也没有可核验锚点（如“内部消息”“很多人说”）。
+
+`score_claims.py` 在 `metrics.json` 的 `sourcing_rigor`（整体及每个分组）输出计数与比率：`citation_rate=(primary+secondary)/tagged`、`primary_citation_rate=primary/tagged`、`unsubstantiated_rate=(uncited_specific+uncited_vague)/tagged`（“张口就来率”）、`checkable_rate=verifiable|conditional 占 endorsed 实证断言的比例`。未标注计入 `untagged`，旧版账本缺省不报错，比率显示为不可计算。出处标签描述言论的引用方式，不改变核验裁定，也不作为事实真伪的证据。
+
+**来源层级与来源可信度**：`cited_source_tier` 记录说话者所引来源的层级，权重为 `authoritative_primary=1.0`、`reputable_media=0.75`、`low_credibility_or_rumor=0.25`、`unnamed_insider=0.1`、`none=0.0`。`metrics.json` 的 `source_quality_score.value = 100 × mean(权重)`，只统计 endorsed 实证断言中已标注的条目；未标注不记为 0，`none` 才记为 0。它描述引用的质量，不是事实真伪的裁定。
+
+**翻车率**：`backfire_rate = contradicted / categorical`，分母为可裁定的 supported、contradicted、mixed 总数；`prediction_backfire_rate` 只统计预测。红绿灯：<10% 绿，10%–25% 黄，>25% 红。mocked 与 rejected 条目不进入分母。
+
+**YouTube 频道互动健康度**：`score_claims.py --info-json-dir DIR` 读取 yt-dlp `--write-info-json` 生成的 `*.info.json`，写入 `channel_stats`（`platform=youtube`）。它汇总订阅者（`channel_follower_count`）、逐片中位与平均播放（`view_count`）、点赞与评论，并给出：订阅—播放比（中位播放 ÷ 订阅，基准 10%–20%）、点赞/播放（合并计算，基准 1.5%–3%）、评论/播放（基准 0.2%–0.5%）、互动率 `(点赞+评论)/播放`（基准 1.4%–3.5%）。异常标记：`ghost_subscribers`（订阅—播放比 <1%）、`bot_view_inflation`（点赞/播放 <0.3%）、`engagement_spike`（点赞/播放 >20%），无触发为 `normal`。这些是启发式基准，不是真实性裁决；目录应只包含被审计频道的视频。
 
 ### 重要区别
 
@@ -185,7 +204,17 @@
 
 这些是保守的项目默认门槛，**不是统计显著性的保证**。说明旧材料缺失、删除视频和转录失败是否可能造成选择偏差。只分析可取得材料时，不得暗示覆盖全部历史。对待验证预测比例不同、领域不同、时间跨度不同的对象，不直接比较总分。
 
-报告领域分数、时间段分数与预测长度分布。最近五年的汇总会有不同的到期机会：近期预测大量 pending 时，明示这种差异；需要比较时采用相同成熟期的子集或明确的分层。不要为了显得精确而给大量小数。
+报告领域分数、时间段分数、**预测难度分层**与**预测提前期（lead time）分布**：
+
+- **预测难度评估（事前）**：在核验结果前为预测标注 `difficulty`（`trivial` / `moderate` / `hard` / `non_consensus`）、可选 `difficulty_score`（1–5）与 `difficulty_rationale`，明确区分“太阳从东边升起 / 近 100% 基准概率”的平凡断言与实质性/反共识预测。指标中单独展示各难度层级支持率与非平凡预测支持率（`non_trivial_strict_support_rate`），防止大量平凡预测虚高观感。
+- **事实可信度（客观核查，仅事实型主张）**：`factual_credibility` 只统计已采纳裁决的 `factual` 主张，给出证伪率（`contradicted / 事实型已裁决数`）、无据传谣率（证伪且 `uncited_specific`/`uncited_vague`）与事实诚信分（0–100）。单条得分：支持 1.0、部分支持 0.5、有出处或未标注的证伪 0.0、无据证伪 −0.5（截断至 0–100）；无据证伪因此比有出处的证伪扣分更重，部分支持（混淆）扣分较轻。
+- **难度加权预测分**：`difficulty_adjusted` 以 trivial 0.5 / moderate 1 / hard 2 / non-consensus 3 加权，分数 = 100 × Σ(权重×支持) / (n × 3)，只做平凡预测的记录无法得高分；另给出 `weighted_strict_support_rate`、提前量加权支持率（权重 log2(1 + 提前天数/30)）与高确信度差距（整体支持率减高确信度支持率，正值表示高确信度表述更不准；确信度由 `certainty_text` 中的标记词判定，属启发式）。
+- **交通灯**：正向指标绿 ≥80% / 黄 60–79.9% / 红 <60%；错误率（证伪率、无据传谣率）绿 <5% / 黄 5–15% / 红 >15%。
+- **主观评分归属**：8 维表达评价与难度评级都标注给出评分的模型（`subjective_attribution`），多模型时显示平均值；客观核查指标以证据为依据，二者在报告中分开标注。
+- **严格时间护栏（`target_date > published_at`）**：任何带明确截止日的 `prediction` 必须指向严格晚于发表时间的事件（如 10 月 1 日视频提及 9 月 30 日事件应归入 `factual`，不得进入预测分母）；脚本在 `freeze-criteria`、`audit_run.py validate`、`adopt_verdict.py` 与 `score_claims.py` 强制校验。
+- **预测提前期统计（Lead Time）**：对同时具备 `first_stated_at` 与 `window_end` 的预测计算 `lead_time_days = window_end - first_stated_at`，输出平均/中位/命中平均提前期，并按 `<=30d`、`31-90d`、`91-180d`、`181-365d`、`>365d` 桶统计数量与支持率，体现更早给出准确判断的信息与决策价值。
+
+最近五年的汇总会有不同的到期机会：近期预测大量 pending 时，明示这种差异；需要比较时采用相同成熟期的子集或明确的分层。不要为了显得精确而给大量小数。
 
 ## 8. 抽样复核与报告边界
 
